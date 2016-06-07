@@ -84,17 +84,16 @@ receive_auth_failed (struct context *c, const struct buffer *buffer)
       switch (auth_retry_get ())
 	{
 	case AR_NONE:
-	  c->sig->signal_received = SIGTERM; /* SOFT-SIGTERM -- Auth failure error */
+	  register_signal (c->sig, SIGTERM, "auth-failure"); /* SOFT-SIGTERM -- Auth failure error */
 	  break;
 	case AR_INTERACT:
 	  ssl_purge_auth (false);
 	case AR_NOINTERACT:
-	  c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- Auth failure error */
+	  register_signal (c->sig, SIGUSR1, "auth-failure"); /* SOFT-SIGUSR1 -- Auth failure error */
 	  break;
 	default:
 	  ASSERT (0);
 	}
-      c->sig->signal_text = "auth-failure";
 #ifdef ENABLE_MANAGEMENT
       if (management)
 	{
@@ -160,14 +159,14 @@ server_pushed_signal (struct context *c, const struct buffer *buffer, const bool
       if (restart)
 	{
 	  msg (D_STREAM_ERRORS, "Connection reset command was pushed by server ('%s')", m);
-	  c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- server-pushed connection reset */
-	  c->sig->signal_text = "server-pushed-connection-reset";
+	  /* SOFT-SIGUSR1 -- server-pushed connection reset */
+	  register_signal (c->sig, SIGUSR1, "server-pushed-connection-reset");
 	}
       else
 	{
 	  msg (D_STREAM_ERRORS, "Halt command was pushed by server ('%s')", m);
-	  c->sig->signal_received = SIGTERM; /* SOFT-SIGTERM -- server-pushed halt */
-	  c->sig->signal_text = "server-pushed-halt";
+          /* SOFT-SIGTERM -- server-pushed halt */
+	  register_signal (c->sig, SIGTERM, "server-pushed-halt");
 	}
 #ifdef ENABLE_MANAGEMENT
       if (management)
@@ -271,7 +270,7 @@ incoming_push_message (struct context *c, const struct buffer *buffer)
 
   goto cleanup;
 error:
-  register_signal (c, SIGUSR1, "process-push-msg-failed");
+  register_signal (c->sig, SIGUSR1, "process-push-msg-failed");
 cleanup:
   gc_free (&gc);
 }
@@ -287,8 +286,8 @@ send_push_request (struct context *c)
   else
     {
       msg (D_STREAM_ERRORS, "No reply from server after sending %d push requests", max_push_requests);
-      c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- server-pushed connection reset */
-      c->sig->signal_text = "no-push-reply";
+      /* SOFT-SIGUSR1 -- server-pushed connection reset */
+      register_signal (c->sig, SIGUSR1, "no-push-reply");
       return false;
     }
 }

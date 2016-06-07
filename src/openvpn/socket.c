@@ -392,8 +392,10 @@ openvpn_getaddrinfo (unsigned int flags,
                 {
                   if (*signal_received == SIGUSR1) /* ignore SIGUSR1 */
                     {
+                      /* Why are we ignoring only SIGUSR1 ? */
                       msg (level, "RESOLVE: Ignored SIGUSR1 signal received during DNS resolution attempt");
-                      *signal_received = 0;
+                      /* Warn: this could potentially overwrite the global signal_received */
+                      *signal_received = 0; /* To be removed in a following patch */
                     }
                   else
                     {
@@ -1279,8 +1281,7 @@ socket_connect (socket_descriptor_t* sd,
 
     openvpn_close_socket (*sd);
     *sd = SOCKET_UNDEFINED;
-    sig_info->signal_received = SIGUSR1;
-    sig_info->source = SIG_SOURCE_CONNECTION_FAILED;
+    register_signal (sig_info, SIGUSR1, "connection-failed");
   } else {
       msg (M_INFO, "TCP connection established with %s",
         print_sockaddr (dest, &gc));
@@ -1375,7 +1376,7 @@ static void
 resolve_remote (struct link_socket *sock,
 		int phase,
 		const char **remote_dynamic,
-		volatile int *signal_received)
+		struct signal_info *sig_info)
 {
   struct gc_arena gc = gc_new ();
 
@@ -1434,7 +1435,7 @@ resolve_remote (struct link_socket *sock,
 					 flags, &ai);
 	  if (status)
 	    status = openvpn_getaddrinfo (flags, sock->remote_host, sock->remote_port,
-					  retry, signal_received, sock->info.af, &ai);
+					  retry, &sig_info->signal_received, sock->info.af, &ai);
 
 	  if(status == 0) {
 	    sock->info.lsa->remote_list = ai;
@@ -1444,20 +1445,19 @@ resolve_remote (struct link_socket *sock,
 		  flags,
 		  phase,
 		  retry,
-		  signal_received ? *signal_received : -1,
+		  sig_info ? sig_info->signal_received : -1,
 		  status);
 	  }
-	  if (signal_received)
+	  if (sig_info && sig_info->signal_received)
 	    {
-	      if (*signal_received)
 		goto done;
 	    }
-	      if (status!=0)
-		{
-		  if (signal_received)
-		    *signal_received = SIGUSR1;
-		  goto done;
-		}
+	  if (status!=0)
+	    {
+	      if (sig_info)
+		register_signal (sig_info, SIGUSR1, "socks-resolve-failure");
+	      goto done;
+	    }
 	}
     }
   
@@ -1736,7 +1736,7 @@ linksock_print_addr (struct link_socket *sock)
 
 static void
 phase2_tcp_server (struct link_socket *sock, const char *remote_dynamic,
-		   volatile int *signal_received)
+		   struct signal_info *sig_info)
 {
   switch (sock->mode)
     {
@@ -1747,7 +1747,7 @@ phase2_tcp_server (struct link_socket *sock, const char *remote_dynamic,
 				       sock->info.lsa->bind_local,
 				       true,
 				       false,
-				       signal_received);
+				       &sig_info->signal_received);
       break;
     case LS_MODE_TCP_LISTEN:
       socket_do_listen (sock->sd,
@@ -1761,7 +1761,7 @@ phase2_tcp_server (struct link_socket *sock, const char *remote_dynamic,
 				   false);
       if (!socket_defined (sock->sd))
 	{
-	  *signal_received = SIGTERM;
+	  register_signal (sig_info, SIGTERM, "socket-undefined");
 	  return;
 	}
       tcp_connection_established (&sock->info.lsa->actual);
@@ -1793,7 +1793,7 @@ phase2_tcp_client (struct link_socket *sock, struct signal_info *sig_info)
 						     sock->proxy_dest_port,
 						     sock->server_poll_timeout,
 						     &sock->stream_buf.residual,
-						     &sig_info->signal_received);
+						     sig_info);
       }
     else if (sock->socks_proxy)
       {
@@ -1801,7 +1801,7 @@ phase2_tcp_client (struct link_socket *sock, struct signal_info *sig_info)
 					sock->sd,
 					sock->proxy_dest_host,
 					sock->proxy_dest_port,
-					&sig_info->signal_received);
+					sig_info);
       }
     if (proxy_retry)
       {
@@ -1828,7 +1828,7 @@ phase2_socks_client (struct link_socket *sock, struct signal_info *sig_info)
 				    sock->ctrl_sd,
 				    sock->sd,
 				    &sock->socks_relay.dest,
-				    &sig_info->signal_received);
+				    sig_info);
 
     if (sig_info->signal_received)
 	return;
@@ -1844,7 +1844,7 @@ phase2_socks_client (struct link_socket *sock, struct signal_info *sig_info)
 	sock->info.lsa->remote_list = NULL;
       }
 
-    resolve_remote (sock, 1, NULL, &sig_info->signal_received);
+    resolve_remote (sock, 1, NULL, sig_info);
 }
 
 /* finalize socket initialization */
@@ -1854,14 +1854,18 @@ link_socket_init_phase2 (struct link_socket *sock,
 			 struct signal_info *sig_info)
 {
   const char *remote_dynamic = NULL;
-  int sig_save = 0;
+  struct signal_info sig_save = {0};
 
   ASSERT (sock);
 
+  /* 
+   * Que: Why is the signal saved and then optionally restored? The original logic
+   * causes SIGTERM/SIGINT to be lost.
+   */
   if (sig_info && sig_info->signal_received)
     {
-      sig_save = sig_info->signal_received;
-      sig_info->signal_received = 0;
+      sig_save = *sig_info;
+      signal_reset (sig_info, 0);
     }
 
   /* initialize buffers */
@@ -1881,12 +1885,11 @@ link_socket_init_phase2 (struct link_socket *sock,
       phase2_inetd (sock, frame, remote_dynamic,  &sig_info->signal_received);
       if (sig_info && sig_info->signal_received)
 	goto done;
-
     }
   else
     {
       /* Second chance to resolv/create socket */
-      resolve_remote (sock, 2, &remote_dynamic,  &sig_info->signal_received);
+      resolve_remote (sock, 2, &remote_dynamic, sig_info);
 
       /* If a valid remote has been found, create the socket with its addrinfo */
       if (sock->info.lsa->current_remote)
@@ -1917,7 +1920,7 @@ link_socket_init_phase2 (struct link_socket *sock,
       if (sock->sd == SOCKET_UNDEFINED)
 	{
 	  msg (M_WARN, "Could not determine IPv4/IPv6 protocol");
-	  sig_info->signal_received = SIGUSR1;
+	  register_signal (sig_info, SIGUSR1, "Could not determine IPv4/IPv6 protocol");
 	  goto done;
 	}
 
@@ -1926,13 +1929,11 @@ link_socket_init_phase2 (struct link_socket *sock,
 
       if (sock->info.proto == PROTO_TCP_SERVER)
 	{
-	  phase2_tcp_server (sock, remote_dynamic,
-			     &sig_info->signal_received);
+	  phase2_tcp_server (sock, remote_dynamic, sig_info);
 	}
       else if (sock->info.proto == PROTO_TCP_CLIENT)
 	{
 	  phase2_tcp_client (sock, sig_info);
-
 	}
       else if (sock->info.proto == PROTO_UDP && sock->socks_proxy)
 	{
@@ -1950,10 +1951,10 @@ link_socket_init_phase2 (struct link_socket *sock,
   linksock_print_addr(sock);
 
  done:
-  if (sig_save && sig_info)
+  if (sig_save.signal_received && sig_info)
     {
-      if (!sig_info->signal_received)
-	sig_info->signal_received = sig_save;
+      /* Always try to restore the saved signal -- register_signal will handle priority */
+      register_signal (sig_info, sig_save.signal_received, sig_save.signal_text);
     }
 }
 

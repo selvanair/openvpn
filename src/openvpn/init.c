@@ -2235,12 +2235,12 @@ do_init_crypto_tls_c1 (struct context *c)
 	    case AR_INTERACT:
 	      ssl_purge_auth (false);
 	    case AR_NOINTERACT:
-	      c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- Password failure error */
+	      /* SOFT-SIGUSR1 -- Password failure error */
+              register_signal (c->sig, SIGUSR1, "private-key-password-failure");
 	      break;
 	    default:
 	      ASSERT (0);
 	    }
-	  c->sig->signal_text = "private-key-password-failure";
 	  return;
 #else
 	  msg (M_FATAL, "Error: private key password verification failed");
@@ -2960,7 +2960,7 @@ do_close_check_if_restart_permitted (struct context *c)
       && (c->sig->signal_received == SIGHUP
 	  || c->sig->signal_received == SIGUSR1))
     {
-      c->sig->signal_received = SIGTERM;
+      register_signal (c->sig, SIGTERM, "inetd-mode-exit");
       msg (M_INFO,
 	   PACKAGE_NAME
 	   " started by inetd/xinetd cannot restart... Exiting.");
@@ -3511,11 +3511,6 @@ init_instance (struct context *c, const struct env_set *env, const unsigned int 
   if (env)
      do_inherit_env (c, env);
 
-  /* signals caught here will abort */
-  c->sig->signal_received = 0;
-  c->sig->signal_text = NULL;
-  c->sig->source = SIG_SOURCE_SOFT;
-
   if (c->mode == CM_P2P)
     init_management_callback_p2p (c);
 
@@ -3938,15 +3933,14 @@ close_context (struct context *c, int sig, unsigned int flags)
   ASSERT (c->sig);
 
   if (sig >= 0)
-    c->sig->signal_received = sig;
+    register_signal (c->sig, sig, "close-context");
 
   if (c->sig->signal_received == SIGUSR1)
     {
       if ((flags & CC_USR1_TO_HUP)
 	  || (c->sig->source == SIG_SOURCE_HARD && (flags & CC_HARD_USR1_TO_HUP)))
         {
-          c->sig->signal_received = SIGHUP;
-          c->sig->signal_text = "close_context usr1 to hup";
+          register_signal (c->sig, SIGHUP, "close_context usr1 to hup");
         }
     }
 

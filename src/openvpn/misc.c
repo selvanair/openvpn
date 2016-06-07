@@ -1566,6 +1566,25 @@ openvpn_sleep (const int n)
       return;
     }
 #endif
+#ifdef WIN32
+  if (HANDLE_DEFINED (win32_signal.in.read))
+    {
+      time_t expire = 0;
+      update_time ();
+      expire = now + n;
+      while (expire > now)
+        {
+          DWORD status = WaitForSingleObject (win32_signal.in.read, (expire - now)*1000);
+          if ( (status == WAIT_OBJECT_0 && win32_signal_get (&win32_signal)) ||
+               (status == WAIT_TIMEOUT) )
+            break;
+          else if (status == WAIT_FAILED)
+            sleep (1);
+          update_time ();
+        }
+      return;
+    }
+#endif
   sleep (n);
 }
 

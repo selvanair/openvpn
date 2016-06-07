@@ -106,7 +106,7 @@ check_tls_dowork (struct context *c)
 	}
       else if (tmp_status == TLSMP_KILL)
 	{
-	  register_signal (c, SIGTERM, "auth-control-exit");
+	  register_signal (c->sig, SIGTERM, "auth-control-exit");
 	}
 
       interval_future_trigger (&c->c2.tmp_int, wakeup);
@@ -122,13 +122,13 @@ void
 check_tls_errors_co (struct context *c)
 {
   msg (D_STREAM_ERRORS, "Fatal TLS error (check_tls_errors_co), restarting");
-  register_signal (c, c->c2.tls_exit_signal, "tls-error"); /* SOFT-SIGUSR1 -- TLS error */
+  register_signal (c->sig, c->c2.tls_exit_signal, "tls-error"); /* SOFT-SIGUSR1 -- TLS error */
 }
 
 void
 check_tls_errors_nco (struct context *c)
 {
-  register_signal (c, c->c2.tls_exit_signal, "tls-error"); /* SOFT-SIGUSR1 -- TLS error */
+  register_signal (c->sig, c->c2.tls_exit_signal, "tls-error"); /* SOFT-SIGUSR1 -- TLS error */
 }
 #endif /* ENABLE_CRYPTO */
 
@@ -299,7 +299,7 @@ check_add_routes_dowork (struct context *c)
 	{
 	  if (!tun_standby (c->c1.tuntap))
 	    {
-	      register_signal (c, SIGHUP, "ip-fail");
+	      register_signal (c->sig, SIGHUP, "ip-fail");
 	      c->persist.restart_sleep_seconds = 10;
 #ifdef WIN32
 	      show_routes (M_INFO|M_NOPREFIX);
@@ -321,7 +321,7 @@ void
 check_inactivity_timeout_dowork (struct context *c)
 {
   msg (M_INFO, "Inactivity timeout (--inactive), exiting");
-  register_signal (c, SIGTERM, "inactive");
+  register_signal (c->sig, SIGTERM, "inactive");
 }
 
 int
@@ -341,7 +341,7 @@ check_server_poll_timeout_dowork (struct context *c)
   if (!tls_initial_packet_received (c->c2.tls_multi))
     {
       msg (M_INFO, "Server poll timeout, restarting");
-      register_signal (c, SIGUSR1, "server_poll");
+      register_signal (c->sig, SIGUSR1, "server_poll");
       c->persist.restart_sleep_seconds = -1;
     }
 }
@@ -366,7 +366,7 @@ schedule_exit (struct context *c, const int n_seconds, const int signal)
 void
 check_scheduled_exit_dowork (struct context *c)
 {
-  register_signal (c, c->c2.scheduled_exit_signal, "delayed-exit");
+  register_signal (c->sig, c->c2.scheduled_exit_signal, "delayed-exit");
 }
 
 #endif
@@ -689,7 +689,7 @@ read_incoming_link (struct context *c)
 	  const struct buffer *fbuf = socket_foreign_protocol_head (c->c2.link_socket);
 	  const int sd = socket_foreign_protocol_sd (c->c2.link_socket);
 	  port_share_redirect (port_share, fbuf, sd);
-	  register_signal (c, SIGTERM, "port-share-redirect");
+	  register_signal (c->sig, SIGTERM, "port-share-redirect");
 	}
       else
 #endif
@@ -697,7 +697,7 @@ read_incoming_link (struct context *c)
 	/* received a disconnect from a connection-oriented protocol */
 	if (c->options.inetd)
 	  {
-	    register_signal (c, SIGTERM, "connection-reset-inetd");
+	    register_signal (c->sig, SIGTERM, "connection-reset-inetd");
 	    msg (D_STREAM_ERRORS, "Connection reset, inetd/xinetd exit [%d]", status);
 	  }
 	else
@@ -711,7 +711,7 @@ read_incoming_link (struct context *c)
 	    else
 #endif
 	      {
-		register_signal (c, SIGUSR1, "connection-reset"); /* SOFT-SIGUSR1 -- TCP connection reset */
+		register_signal (c->sig, SIGUSR1, "connection-reset"); /* SOFT-SIGUSR1 -- TCP connection reset */
 		msg (D_STREAM_ERRORS, "Connection reset, restarting [%d]", status);
 	      }
 	  }
@@ -834,7 +834,7 @@ process_incoming_link_part1 (struct context *c, struct link_socket_info *lsi, bo
       if (!decrypt_status && link_socket_connection_oriented (c->c2.link_socket))
 	{
 	  /* decryption errors are fatal in TCP mode */
-	  register_signal (c, SIGUSR1, "decryption-error"); /* SOFT-SIGUSR1 -- decryption error in TCP mode */
+	  register_signal (c->sig, SIGUSR1, "decryption-error"); /* SOFT-SIGUSR1 -- decryption error in TCP mode */
 	  msg (D_STREAM_ERRORS, "Fatal decryption error (process_incoming_link), restarting");
 	}
 #else /* ENABLE_CRYPTO */
@@ -971,7 +971,7 @@ read_incoming_tun (struct context *c)
   /* Was TUN/TAP interface stopped? */
   if (tuntap_stop (c->c2.buf.len))
     {
-      register_signal (c, SIGTERM, "tun-stop");
+      register_signal (c->sig, SIGTERM, "tun-stop");
       msg (M_INFO, "TUN/TAP interface has been stopped, exiting");
       perf_pop ();
       return;		  
@@ -980,7 +980,7 @@ read_incoming_tun (struct context *c)
   /* Was TUN/TAP I/O operation aborted? */
   if (tuntap_abort(c->c2.buf.len))
   {
-     register_signal(c, SIGHUP, "tun-abort");
+     register_signal(c->sig, SIGHUP, "tun-abort");
      c->persist.restart_sleep_seconds = 10;
      msg(M_INFO, "TUN/TAP I/O operation aborted, restarting");
      perf_pop();
@@ -1229,7 +1229,7 @@ process_outgoing_link (struct context *c)
           !tls_initial_packet_received (c->c2.tls_multi) && c->options.mode == MODE_POINT_TO_POINT)
 	{
 	  msg (M_INFO, "Network unreachable, restarting");
-	  register_signal (c, SIGUSR1, "network-unreachable");
+	  register_signal (c->sig, SIGUSR1, "network-unreachable");
 	}
 #endif
     }

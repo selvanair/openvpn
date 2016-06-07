@@ -288,12 +288,12 @@ openvpn_main (int argc, char *argv[])
 	      /* pass restart status to management subsystem */
 	      signal_restart_status (c.sig);
 	    }
-	  while (c.sig->signal_received == SIGUSR1);
+	  while (signal_reset(c.sig, SIGUSR1) == SIGUSR1);
 
 	  uninit_options (&c.options);
 	  gc_reset (&c.gc);
 	}
-      while (c.sig->signal_received == SIGHUP);
+      while (signal_reset(c.sig, SIGHUP) == SIGHUP);
     }
 
   context_gc_free (&c);

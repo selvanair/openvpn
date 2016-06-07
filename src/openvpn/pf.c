@@ -518,8 +518,7 @@ pf_check_reload (struct context *c)
 		  reloaded = true;
 		  if (pf_kill_test (pfs))
 		    {
-		      c->sig->signal_received = SIGTERM;
-		      c->sig->signal_text = "pf-kill";
+		      register_signal (c->sig, SIGTERM, "pf-kill");
 		    }
 		}
 	      c->c2.pf.file_last_mod = s.st_mtime;

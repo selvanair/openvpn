@@ -387,8 +387,7 @@ process_received_occ_msg (struct context *c)
 
     case OCC_EXIT:
       dmsg (D_PACKET_CONTENT, "RECEIVED OCC_EXIT");
-      c->sig->signal_received = SIGTERM;
-      c->sig->signal_text = "remote-exit";
+      register_signal (c->sig, SIGTERM, "remote-exit");
       break;
     }
   c->c2.buf.len = 0; /* don't pass packet on */

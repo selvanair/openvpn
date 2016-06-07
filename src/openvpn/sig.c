@@ -48,17 +48,21 @@ struct signal_info siginfo_static; /* GLOBAL */
 
 struct signame {
   int value;
+  int priority;
   const char *upper;
   const char *lower;
 };
 
 static const struct signame signames[] = {
-  { SIGINT,  "SIGINT",  "sigint"},
-  { SIGTERM, "SIGTERM", "sigterm" },
-  { SIGHUP,  "SIGHUP",  "sighup" },
-  { SIGUSR1, "SIGUSR1", "sigusr1" },
-  { SIGUSR2, "SIGUSR2", "sigusr2" }
+  { SIGINT,  5,  "SIGINT",  "sigint" },
+  { SIGTERM, 4,  "SIGTERM", "sigterm" },
+  { SIGHUP,  3,  "SIGHUP",  "sighup" },
+  { SIGUSR1, 2,  "SIGUSR1", "sigusr1" },
+  { SIGUSR2, 1,  "SIGUSR2", "sigusr2" }
 };
+
+static unsigned long long ignored_hard_signals_mask;
+static unsigned long long ignored_soft_signals_mask;
 
 int
 parse_signal (const char *signame)
@@ -84,6 +88,18 @@ signal_name (const int sig, const bool upper)
   return "UNKNOWN";
 }
 
+int
+signal_priority (int sig)
+{
+  int i;
+  for (i = 0; i < (int) SIZE (signames); ++i)
+    {
+      if (sig == signames[i].value)
+	return signames[i].priority;
+    }
+  return -1;
+}
+
 const char *
 signal_description (const int signum, const char *sigtext)
 {
@@ -93,30 +109,162 @@ signal_description (const int signum, const char *sigtext)
     return signal_name (signum, false);
 }
 
+/**
+ * Block (i.e., defer) all unix signals.
+ * Used while directly modifying the volatile elements of
+ * siginfo_static.
+ */
+static inline void
+block_async_signals (void)
+{
+#if !defined(WIN32) && defined(HAVE_SIGNAL_H)
+  sigset_t all;
+  sigfillset (&all); /* all signals */
+
+  sigprocmask (SIG_BLOCK, &all, NULL);
+#endif
+}
+
+/**
+ * Unblock all unix signals.
+ */
+static inline void
+unblock_async_signals (void)
+{
+#if !defined(WIN32) && defined(HAVE_SIGNAL_H)
+  sigset_t none;
+  sigemptyset (&none);
+  sigprocmask (SIG_SETMASK, &none, NULL);
+#endif
+}
+
+/**
+ * Private function for registering a signal in the specified
+ * signal_info struct. This could be the global siginfo_static
+ * or a context specific signinfo struct.
+ *
+ * A signal is allowed to override an already registered
+ * one only if it has a higher priority.
+ * Returns true if the signal is set, false otherwise.
+ *
+ * Do not call any "AS-unsafe" functions such as printf from here
+ * as this may be called from signal_handler().
+ */
+static bool
+throw_signal_do_work (struct signal_info *si, int signum, int source)
+{
+  bool ret = false;
+  if (signal_priority(signum) >= signal_priority (si->signal_received))
+    {
+      si->signal_received = signum;
+      si->source = source;
+      ret = true;
+    }
+  return ret;
+}
+
+/**
+ * Throw a hard signal. Called from management and when windows
+ * signals are received through ctrl-c, exit event etc.
+ */
 void
 throw_signal (const int signum)
 {
-  siginfo_static.signal_received = signum;
-  siginfo_static.source = SIG_SOURCE_HARD;
+  if (ignored_hard_signals_mask & (1LL << signum))
+    {
+      dmsg (D_LOW, "Signal %s is currently ignored", signal_name(signum, true));
+      return;
+    }
+  block_async_signals ();
+
+  if (!throw_signal_do_work (&siginfo_static, signum, SIG_SOURCE_HARD))
+    dmsg (D_LOW, "Ignoring %s when %s has been received", signal_name(signum, true),
+          signal_name (siginfo_static.signal_received, true));
+  else
+    dmsg (D_LOW, "Throw signal: %s ", signal_name(signum, true));
+
+  unblock_async_signals ();
 }
 
+/**
+ * Throw a soft global signal. Used to register internally generated signals
+ * due to errors that require a restart or exit, or restart requests
+ * received from the server. A textual description of the signal may
+ * be provided.
+ */
 void
 throw_signal_soft (const int signum, const char *signal_text)
 {
-  siginfo_static.signal_received = signum;
-  siginfo_static.source = SIG_SOURCE_SOFT;
-  siginfo_static.signal_text = signal_text;
+  if (ignored_soft_signals_mask & (1LL << signum))
+    {
+      dmsg (D_LOW, "Signal %s is currently ignored", signal_name(signum, true));
+      return;
+    }
+  block_async_signals ();
+
+  if (throw_signal_do_work (&siginfo_static, signum, SIG_SOURCE_SOFT))
+    siginfo_static.signal_text = signal_text;
+  else
+    dmsg (D_LOW, "Ignoring %s when %s has been received", signal_name(signum, true),
+          signal_name (siginfo_static.signal_received, true));
+
+  unblock_async_signals ();
 }
 
-static void
-signal_reset (struct signal_info *si)
+/**
+ * Register a soft signal in the signal_info struct si respecting priority.
+ * si may be a pointer to the global siginfo_static or a context-specific
+ * signal in a mult-instance.
+ */
+void
+register_signal (struct signal_info *si, int signum, const char *signal_text)
 {
+  if (si == &siginfo_static) /* attempting to alter the global signal */
+    {
+      if (ignored_soft_signals_mask & (1LL << signum))
+        {
+          dmsg (D_LOW, "Signal %s is currently ignored", signal_name(signum, true));
+          return;
+        }
+      block_async_signals ();
+    }
+
+  if (throw_signal_do_work (si, signum, SIG_SOURCE_SOFT))
+    si->signal_text = signal_text;
+  else
+    dmsg (D_LOW, "Ignoring %s when %s has been received", signal_name(signum, true),
+          signal_name (si->signal_received, true));
+
+  if (si == &siginfo_static)
+    unblock_async_signals ();
+}
+
+/**
+ * Clear the signal if its current value equals signum. If
+ * signum is zero the signal is cleared independent of its current
+ * value. Return the current value of the signal.
+ */
+int
+signal_reset (struct signal_info *si, int signum)
+{
+  int sig_saved = 0;
   if (si)
     {
-      si->signal_received = 0;
-      si->signal_text = NULL;
-      si->source = SIG_SOURCE_SOFT;
+      if (si == &siginfo_static) /* attempting to alter the global signal */
+        block_async_signals ();
+
+      sig_saved = si->signal_received;
+      if (!signum || sig_saved == signum)
+      {
+        si->signal_received = 0;
+        si->signal_text = NULL;
+        si->source = SIG_SOURCE_SOFT;
+      }
+
+      if (si == &siginfo_static)
+        unblock_async_signals ();
     }
+  return sig_saved;
 }
 
 void
@@ -134,9 +282,6 @@ print_signal (const struct signal_info *si, const char *title, int msglevel)
           break;
         case SIG_SOURCE_HARD:
           hs = "hard";
-          break;
-        case SIG_SOURCE_CONNECTION_FAILED:
-          hs = "connection failed(soft)";
           break;
         default:
           ASSERT(0);
@@ -203,7 +348,7 @@ signal_restart_status (const struct signal_info *si)
 static void
 signal_handler (const int signum)
 {
-  throw_signal (signum);
+  throw_signal_do_work (&siginfo_static, signum, SIG_SOURCE_HARD);
   signal (signum, signal_handler);
 }
 
@@ -223,15 +368,30 @@ pre_init_signal_catch (void)
 {
 #ifndef WIN32
 #ifdef HAVE_SIGNAL_H
+  sigset_t block_mask;
+  struct sigaction sa;
+  CLEAR (sa);
+
+  sigfillset (&block_mask); /* all signals */
+  sa.sa_handler = signal_handler;
+  sa.sa_mask = block_mask; /* signals blocked inside the handler */
+  sa.sa_flags = 0;
+
   signal_mode = SM_PRE_INIT;
-  signal (SIGINT, signal_handler);
-  signal (SIGTERM, signal_handler);
-  signal (SIGHUP, SIG_IGN);
-  signal (SIGUSR1, SIG_IGN);
-  signal (SIGUSR2, SIG_IGN);
-  signal (SIGPIPE, SIG_IGN);
+  sigaction (SIGINT, &sa, NULL);
+  sigaction (SIGTERM, &sa, NULL);
+
+  sa.sa_handler = SIG_IGN;
+  sigaction (SIGHUP, &sa, NULL);
+  sigaction (SIGUSR1, &sa, NULL);
+  sigaction (SIGUSR2, &sa, NULL);
+  sigaction (SIGPIPE, &sa, NULL);
+
 #endif /* HAVE_SIGNAL_H */
 #endif /* WIN32 */
+  /* ignore low priority signals from management and console */
+  ignored_hard_signals_mask = (1LL << SIGHUP) | (1LL << SIGUSR1) | (1LL << SIGUSR2);
+  ignored_soft_signals_mask = 0;
 }
 
 void
@@ -239,15 +399,43 @@ post_init_signal_catch (void)
 {
 #ifndef WIN32
 #ifdef HAVE_SIGNAL_H
+  sigset_t block_mask;
+  struct sigaction sa;
+  CLEAR (sa);
+
+  sigfillset (&block_mask); /* all signals */
+  sa.sa_handler = signal_handler;
+  sa.sa_mask = block_mask; /* signals blocked inside the handler */
+  sa.sa_flags = 0;
+
   signal_mode = SM_POST_INIT;
-  signal (SIGINT, signal_handler);
-  signal (SIGTERM, signal_handler);
-  signal (SIGHUP, signal_handler);
-  signal (SIGUSR1, signal_handler);
-  signal (SIGUSR2, signal_handler);
-  signal (SIGPIPE, SIG_IGN);
+  sigaction (SIGINT, &sa, NULL);
+  sigaction (SIGTERM, &sa, NULL);
+  sigaction (SIGHUP, &sa, NULL);
+  sigaction (SIGUSR1, &sa, NULL);
+  sigaction (SIGUSR2, &sa, NULL);
+  sigaction (SIGPIPE, &sa, NULL);
 #endif /* HAVE_SIGNAL_H */
 #endif
+  ignored_hard_signals_mask = 0;
+  ignored_soft_signals_mask = 0;
+}
+
+void
+halt_low_priority_signals ()
+{
+#ifndef WIN32
+#ifdef HAVE_SIGNAL_H
+  struct sigaction sa;
+  CLEAR (sa);
+  sa.sa_handler = SIG_IGN;
+  sigaction (SIGHUP, &sa, NULL);
+  sigaction (SIGUSR1, &sa, NULL);
+  sigaction (SIGUSR2, &sa, NULL);
+#endif
+#endif
+  ignored_hard_signals_mask = (1LL << SIGHUP) | (1LL << SIGUSR1) | (1LL << SIGUSR2);
+  ignored_soft_signals_mask = (1LL << SIGHUP) | (1LL << SIGUSR1) | (1LL << SIGUSR2);
 }
 
 /* called after daemonization to retain signal settings */
@@ -314,8 +502,17 @@ process_explicit_exit_notification_init (struct context *c)
   msg (M_INFO, "SIGTERM received, sending exit notification to peer");
   event_timeout_init (&c->c2.explicit_exit_notification_interval, 1, 0);
   reset_coarse_timers (c);
-  signal_reset (c->sig);
+
+  /* Windows exit event will continue trigering SIGTERM -- halt it */
   halt_non_edge_triggered_signals ();
+
+  /* Before resetting the signal, ensure low priority signals (both hard and soft)
+   * will not be registered during the exit notification period.
+   */
+  halt_low_priority_signals (); /* Set SIGUSR1/SIGHUP/SIUSR2 unix signals to SIG_IGN */
+  ignored_soft_signals_mask = (1LL << SIGUSR1) | (1LL << SIGUSR2) | (1LL << SIGHUP);
+
+  signal_reset (c->sig, 0);
   c->c2.explicit_exit_notification_time_wait = now;
 }
 
@@ -330,8 +527,8 @@ process_explicit_exit_notification_timer_wakeup (struct context *c)
       if (now >= c->c2.explicit_exit_notification_time_wait + c->options.ce.explicit_exit_notification)
 	{
 	  event_timeout_clear (&c->c2.explicit_exit_notification_interval);
-	  c->sig->signal_received = SIGTERM;
-	  c->sig->signal_text = "exit-with-notification";
+	  register_signal (c->sig, SIGTERM, "exit-with-notification");
+	  ignored_soft_signals_mask = 0;
 	}
       else
 	{
@@ -349,7 +546,7 @@ void
 remap_signal (struct context *c)
 {
   if (c->sig->signal_received == SIGUSR1 && c->options.remap_sigusr1)
-    c->sig->signal_received = c->options.remap_sigusr1;
+    register_signal (c->sig, c->options.remap_sigusr1, c->sig->signal_text);
 }
 
 static void
@@ -358,7 +555,7 @@ process_sigusr2 (const struct context *c)
   struct status_output *so = status_open (NULL, 0, M_INFO, NULL, 0);
   print_status (c, so);
   status_close (so);
-  signal_reset (c->sig);
+  signal_reset (c->sig, SIGUSR2);
 }
 
 static bool
@@ -376,35 +573,12 @@ process_sigterm (struct context *c)
   return ret;
 }
 
-/**
- * If a restart signal is received during exit-notification, reset the
- * signal and return true.
- */
-static bool
-ignore_restart_signals (struct context *c)
-{
-  bool ret = false;
-#ifdef ENABLE_OCC
-  if ( (c->sig->signal_received == SIGUSR1 || c->sig->signal_received == SIGHUP) &&
-        event_timeout_defined(&c->c2.explicit_exit_notification_interval) )
-    {
-       msg (M_INFO, "Ignoring %s received during exit notification",
-            signal_name(c->sig->signal_received, true));
-       signal_reset (c->sig);
-       ret = true;
-    }
-#endif
-  return ret;
-}
-
 bool
 process_signal (struct context *c)
 {
   bool ret = true;
 
-  if (ignore_restart_signals (c))
-    ret = false;
-  else if (c->sig->signal_received == SIGTERM || c->sig->signal_received == SIGINT)
+  if (c->sig->signal_received == SIGTERM || c->sig->signal_received == SIGINT)
     {
       ret = process_sigterm (c);
     }
@@ -414,12 +588,4 @@ process_signal (struct context *c)
       ret = false;
     }
   return ret;
-}
-
-void
-register_signal (struct context *c, int sig, const char *text)
-{
-  if (c->sig->signal_received != SIGTERM)
-    c->sig->signal_received = sig;
-  c->sig->signal_text = text;
 }
