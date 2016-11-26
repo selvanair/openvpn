@@ -290,7 +290,6 @@ openvpn_getaddrinfo (unsigned int flags,
 {
   struct addrinfo hints;
   int status;
-  int sigrec = 0;
   int msglevel = (flags & GETADDR_FATAL) ? M_FATAL : D_RESOLVE_ERRORS;
   struct gc_arena gc = gc_new ();
   const char *print_hostname;
@@ -316,10 +315,6 @@ openvpn_getaddrinfo (unsigned int flags,
 
   if (flags & GETADDR_MSG_VIRT_OUT)
     msglevel |= M_MSG_VIRT_OUT;
-
-  if ((flags & (GETADDR_FATAL_ON_SIGNAL|GETADDR_WARN_ON_SIGNAL))
-      && !signal_received)
-    signal_received = &sigrec;
 
   /* try numeric ipv6 addr first */
   CLEAR(hints);
@@ -385,33 +380,6 @@ openvpn_getaddrinfo (unsigned int flags,
                 flags, hints.ai_family, hints.ai_socktype);
           status = getaddrinfo(hostname, servname, &hints, res);
 
-          if (signal_received)
-            {
-              get_signal (signal_received);
-              if (*signal_received) /* were we interrupted by a signal? */
-                {
-                  if (*signal_received == SIGUSR1) /* ignore SIGUSR1 */
-                    {
-                      /* Why are we ignoring only SIGUSR1 ? */
-                      msg (level, "RESOLVE: Ignored SIGUSR1 signal received during DNS resolution attempt");
-                      /* Warn: this could potentially overwrite the global signal_received */
-                      *signal_received = 0; /* To be removed in a following patch */
-                    }
-                  else
-                    {
-		      /* turn success into failure (interrupted syscall) */
-                      if (0 == status) {
-                          ASSERT(res);
-                          freeaddrinfo(*res);
-                          *res = NULL;
-                          status = EAI_AGAIN;	/* = temporary failure */
-                          errno = EINTR;
-                      }
-                      goto done;
-                    }
-                }
-            }
-
           /* success? */
           if (0 == status)
             break;
@@ -432,6 +400,9 @@ openvpn_getaddrinfo (unsigned int flags,
             goto done;
 
           openvpn_sleep (fail_wait_interval);
+          /* if signal received break out of retry loop */
+          if (siginfo_static.signal_received && siginfo_static.signal_received != SIGUSR2)
+            goto done;
         }
 
       ASSERT(res);
@@ -449,15 +420,8 @@ openvpn_getaddrinfo (unsigned int flags,
     }
 
  done:
-  if (signal_received && *signal_received)
-    {
-      int level = 0;
-      if (flags & GETADDR_FATAL_ON_SIGNAL)
-        level = M_FATAL;
-      else if (flags & GETADDR_WARN_ON_SIGNAL)
-        level = M_WARN;
-      msg (level, "RESOLVE: signal received during DNS resolution attempt");
-    }
+  if (signal_received)
+    get_signal(signal_received);
 
   gc_free (&gc);
   return status;
