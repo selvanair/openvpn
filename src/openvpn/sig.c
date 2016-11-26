@@ -117,7 +117,7 @@ signal_description (const int signum, const char *sigtext)
 static inline void
 block_async_signals (void)
 {
-#if !defined(WIN32) && defined(HAVE_SIGNAL_H)
+#if !defined(_WIN32) && defined(HAVE_SIGNAL_H)
   sigset_t all;
   sigfillset (&all); /* all signals */
 
@@ -131,7 +131,7 @@ block_async_signals (void)
 static inline void
 unblock_async_signals (void)
 {
-#if !defined(WIN32) && defined(HAVE_SIGNAL_H)
+#if !defined(_WIN32) && defined(HAVE_SIGNAL_H)
   sigset_t none;
   sigemptyset (&none);
   sigprocmask (SIG_SETMASK, &none, NULL);
@@ -366,8 +366,7 @@ static int signal_mode; /* GLOBAL */
 void
 pre_init_signal_catch (void)
 {
-#ifndef WIN32
-#ifdef HAVE_SIGNAL_H
+#if !defined(_WIN32) && defined(HAVE_SIGNAL_H)
   sigset_t block_mask;
   struct sigaction sa;
   CLEAR (sa);
@@ -387,8 +386,7 @@ pre_init_signal_catch (void)
   sigaction (SIGUSR2, &sa, NULL);
   sigaction (SIGPIPE, &sa, NULL);
 
-#endif /* HAVE_SIGNAL_H */
-#endif /* WIN32 */
+#endif /* HAVE_SIGNAL_H && !_WIN32*/
   /* ignore low priority signals from management and console */
   ignored_hard_signals_mask = (1LL << SIGHUP) | (1LL << SIGUSR1) | (1LL << SIGUSR2);
   ignored_soft_signals_mask = 0;
@@ -397,8 +395,7 @@ pre_init_signal_catch (void)
 void
 post_init_signal_catch (void)
 {
-#ifndef WIN32
-#ifdef HAVE_SIGNAL_H
+#if !defined(_WIN32) && defined(HAVE_SIGNAL_H)
   sigset_t block_mask;
   struct sigaction sa;
   CLEAR (sa);
@@ -415,8 +412,7 @@ post_init_signal_catch (void)
   sigaction (SIGUSR1, &sa, NULL);
   sigaction (SIGUSR2, &sa, NULL);
   sigaction (SIGPIPE, &sa, NULL);
-#endif /* HAVE_SIGNAL_H */
-#endif
+#endif /* HAVE_SIGNAL_H && !_WIN32*/
   ignored_hard_signals_mask = 0;
   ignored_soft_signals_mask = 0;
 }
@@ -424,16 +420,14 @@ post_init_signal_catch (void)
 void
 halt_low_priority_signals ()
 {
-#ifndef WIN32
-#ifdef HAVE_SIGNAL_H
+#if !defined(_WIN32) && defined(HAVE_SIGNAL_H)
   struct sigaction sa;
   CLEAR (sa);
   sa.sa_handler = SIG_IGN;
   sigaction (SIGHUP, &sa, NULL);
   sigaction (SIGUSR1, &sa, NULL);
   sigaction (SIGUSR2, &sa, NULL);
-#endif
-#endif
+#endif /* HAVE_SIGNAL_H && !_WIN32*/
   ignored_hard_signals_mask = (1LL << SIGHUP) | (1LL << SIGUSR1) | (1LL << SIGUSR2);
   ignored_soft_signals_mask = (1LL << SIGHUP) | (1LL << SIGUSR1) | (1LL << SIGUSR2);
 }
@@ -479,7 +473,7 @@ print_status (const struct context *c, struct status_output *so)
   status_printf (so, "Pre-encrypt truncations," counter_format, c->c2.n_trunc_pre_encrypt);
   status_printf (so, "Post-decrypt truncations," counter_format, c->c2.n_trunc_post_decrypt);
 #endif
-#ifdef WIN32
+#ifdef _WIN32
   if (tuntap_defined (c->c1.tuntap))
     status_printf (so, "TAP-WIN32 driver status,\"%s\"",
 	 tap_win_getinfo (c->c1.tuntap, &gc));
