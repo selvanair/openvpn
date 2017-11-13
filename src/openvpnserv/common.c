@@ -67,6 +67,7 @@ GetRegString(HKEY key, LPCTSTR value, LPTSTR data, DWORD size, LPCTSTR default_v
         if (openvpn_sntprintf(data, len, default_value) > 0)
         {
             status = ERROR_SUCCESS;
+            MsgToEventLog(M_INFO, TEXT("Reg value: %s set to default: %s"), value, data);
         }
     }
 
