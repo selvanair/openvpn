@@ -69,14 +69,6 @@
 #define CERT_STORE_OPEN_EXISTING_FLAG 0x00004000
 #endif
 
-/* Not in mingw-w64 as well */
-#ifndef CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG
-#define CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG 0x00020000
-#endif
-#ifndef CERT_NCRYPT_KEY_SPEC
-#define CERT_NCRYPT_KEY_SPEC 0xFFFFFFFF
-#endif
-
 /* Size of an SSL signature: MD5+SHA1 */
 #define SSL_SIG_LENGTH  36
 
@@ -536,7 +528,7 @@ SSL_CTX_use_CryptoAPI_certificate(SSL_CTX *ssl_ctx, const char *cert_prop)
         if (!(SSL_CTX_get_options(ssl_ctx) & SSL_OP_NO_TLSv1_2))
         {
             msg(M_WARN, "WARNING: cryptapicert: only legacy private key handle is available."
-                        "Disabling TLS v1.2");
+                        " Disabling TLS v1.2");
             SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_TLSv1_2);
         }
     }
