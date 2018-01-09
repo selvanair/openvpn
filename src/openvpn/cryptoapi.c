@@ -106,12 +106,13 @@ typedef struct _CAPI_DATA {
     HCRYPTPROV_OR_NCRYPT_KEY_HANDLE crypt_prov;
     DWORD key_spec;
     BOOL free_crypt_prov;
+    int ref_count;
 } CAPI_DATA;
 
 static void
 CAPI_DATA_free(CAPI_DATA *cd)
 {
-    if (!cd)
+    if (!cd || cd->ref_count-- > 0)
     {
         return;
     }
@@ -467,14 +468,83 @@ find_certificate_in_store(const char *cert_prop, HCERTSTORE cert_store)
     return rv;
 }
 
+static int
+ssl_ctx_set_rsakey(SSL_CTX *ssl_ctx, CAPI_DATA *cd, EVP_PKEY *pkey)
+{
+    RSA *rsa = NULL, *pub_rsa;
+    RSA_METHOD *my_rsa_method = NULL;
+    bool rsa_method_set = false;
+
+    my_rsa_method = RSA_meth_new("Microsoft Cryptography API RSA Method",
+                                  RSA_METHOD_FLAG_NO_CHECK);
+    check_malloc_return(my_rsa_method);
+    RSA_meth_set_pub_enc(my_rsa_method, rsa_pub_enc);
+    RSA_meth_set_pub_dec(my_rsa_method, rsa_pub_dec);
+    RSA_meth_set_priv_enc(my_rsa_method, rsa_priv_enc);
+    RSA_meth_set_priv_dec(my_rsa_method, rsa_priv_dec);
+    RSA_meth_set_init(my_rsa_method, NULL);
+    RSA_meth_set_finish(my_rsa_method, finish);
+    RSA_meth_set0_app_data(my_rsa_method, cd);
+
+    rsa = RSA_new();
+    if (rsa == NULL)
+    {
+        SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_FILE, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
+
+    pub_rsa = EVP_PKEY_get0_RSA(pkey);
+
+    /* Our private key is external, so we fill in only n and e from the public key */
+    const BIGNUM *n = NULL;
+    const BIGNUM *e = NULL;
+    RSA_get0_key(pub_rsa, &n, &e, NULL);
+    BIGNUM *rsa_n = BN_dup(n);
+    BIGNUM *rsa_e = BN_dup(e);
+    if (!rsa_n || !rsa_e || !RSA_set0_key(rsa, rsa_n, rsa_e, NULL))
+    {
+        BN_free(rsa_n); /* ok to free even if NULL */
+        BN_free(rsa_e);
+        msg(M_NONFATAL, "ERROR: ssl_ctx_set_rsa_key: out of memory");
+        goto err;
+    }
+    RSA_set_flags(rsa, RSA_flags(rsa) | RSA_FLAG_EXT_PKEY);
+    if (!RSA_set_method(rsa, my_rsa_method))
+    {
+        msg(M_NONFATAL, "ERROR: ssl_ctx_set_rsa_key: RSA_set_method failed");
+        goto err;
+    }
+    rsa_method_set = true;
+    cd->ref_count++; /* so that cd gets down referenced, not freed on any error below */
+
+    if (!SSL_CTX_use_RSAPrivateKey(ssl_ctx, rsa))
+    {
+        msg(M_NONFATAL, "ERROR: ssl_ctx_set_rsa_key: SSL_CTX_use_RSAPrivatekey failed");
+        goto err;
+    }
+    /* SSL_CTX_use_RSAPrivateKey() increased the reference count in 'rsa', so
+     * we decrease it here with RSA_free(), or it will never be cleaned up. */
+    RSA_free(rsa);
+    return 1;
+
+err:
+    if (rsa)
+    {
+        RSA_free(rsa);
+    }
+    if (my_rsa_method && !rsa_method_set)
+    {
+        RSA_meth_free(my_rsa_method);
+    }
+    return 0;
+}
+
 int
 SSL_CTX_use_CryptoAPI_certificate(SSL_CTX *ssl_ctx, const char *cert_prop)
 {
     HCERTSTORE cs;
     X509 *cert = NULL;
-    RSA *rsa = NULL, *pub_rsa;
     CAPI_DATA *cd = calloc(1, sizeof(*cd));
-    RSA_METHOD *my_rsa_method = NULL;
 
     if (cd == NULL)
     {
@@ -533,6 +603,21 @@ SSL_CTX_use_CryptoAPI_certificate(SSL_CTX *ssl_ctx, const char *cert_prop)
     /* here we don't need to do CryptGetUserKey() or anything; all necessary key
      * info is in cd->cert_context, and then, in cd->crypt_prov.  */
 
+    /* Public key in cert is NULL until we call SSL_CTX_use_certificate(),
+     * so we do it here then...  */
+    if (!SSL_CTX_use_certificate(ssl_ctx, cert))
+    {
+        goto err;
+    }
+
+    /* the public key */
+    EVP_PKEY *pkey = X509_get0_pubkey(cert);
+
+    /* SSL_CTX_use_certificate() increased the reference count in 'cert', so
+     * we decrease it here with X509_free(), or it will never be cleaned up. */
+    X509_free(cert);
+    cert = NULL;
+
     /* If we do not have an NCRYPT key handle disable TLS v1.2 */
     if (cd->key_spec != CERT_NCRYPT_KEY_SPEC)
     {
@@ -544,84 +629,24 @@ SSL_CTX_use_CryptoAPI_certificate(SSL_CTX *ssl_ctx, const char *cert_prop)
         }
     }
 
-    my_rsa_method = RSA_meth_new("Microsoft Cryptography API RSA Method",
-                                  RSA_METHOD_FLAG_NO_CHECK);
-    check_malloc_return(my_rsa_method);
-    RSA_meth_set_pub_enc(my_rsa_method, rsa_pub_enc);
-    RSA_meth_set_pub_dec(my_rsa_method, rsa_pub_dec);
-    RSA_meth_set_priv_enc(my_rsa_method, rsa_priv_enc);
-    RSA_meth_set_priv_dec(my_rsa_method, rsa_priv_dec);
-    RSA_meth_set_init(my_rsa_method, NULL);
-    RSA_meth_set_finish(my_rsa_method, finish);
-    RSA_meth_set0_app_data(my_rsa_method, cd);
-
-    rsa = RSA_new();
-    if (rsa == NULL)
+    if (EVP_PKEY_get0_RSA(pkey))
     {
-        SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_FILE, ERR_R_MALLOC_FAILURE);
-        goto err;
+        if (!ssl_ctx_set_rsakey(ssl_ctx, cd, pkey))
+        {
+            goto err;
+        }
     }
-
-    /* Public key in cert is NULL until we call SSL_CTX_use_certificate(),
-     * so we do it here then...  */
-    if (!SSL_CTX_use_certificate(ssl_ctx, cert))
-    {
-        goto err;
-    }
-    /* the public key */
-    EVP_PKEY *pkey = X509_get0_pubkey(cert);
-
-    /* SSL_CTX_use_certificate() increased the reference count in 'cert', so
-     * we decrease it here with X509_free(), or it will never be cleaned up. */
-    X509_free(cert);
-    cert = NULL;
-
-    if (!(pub_rsa = EVP_PKEY_get0_RSA(pkey)))
+    else
     {
         msg(M_WARN, "cryptoapicert requires an RSA certificate");
         goto err;
     }
-
-    /* Our private key is external, so we fill in only n and e from the public key */
-    const BIGNUM *n = NULL;
-    const BIGNUM *e = NULL;
-    RSA_get0_key(pub_rsa, &n, &e, NULL);
-    if (!RSA_set0_key(rsa, BN_dup(n), BN_dup(e), NULL))
-    {
-        goto err;
-    }
-    RSA_set_flags(rsa, RSA_flags(rsa) | RSA_FLAG_EXT_PKEY);
-    if (!RSA_set_method(rsa, my_rsa_method))
-    {
-        goto err;
-    }
-
-    if (!SSL_CTX_use_RSAPrivateKey(ssl_ctx, rsa))
-    {
-        goto err;
-    }
-    /* SSL_CTX_use_RSAPrivateKey() increased the reference count in 'rsa', so
-    * we decrease it here with RSA_free(), or it will never be cleaned up. */
-    RSA_free(rsa);
+    /* At this point cd is succesfully linked to the private key and will get freed with it */
+    cd->ref_count--;
     return 1;
 
 err:
-    if (cert)
-    {
-        X509_free(cert);
-    }
-    if (rsa)
-    {
-        RSA_free(rsa);
-    }
-    else
-    {
-        if (my_rsa_method)
-        {
-            free(my_rsa_method);
-        }
-        CAPI_DATA_free(cd);
-    }
+    CAPI_DATA_free(cd);
     return 0;
 }
 
