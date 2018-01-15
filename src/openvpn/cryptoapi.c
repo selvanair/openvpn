@@ -101,7 +101,7 @@ static ERR_STRING_DATA CRYPTOAPI_str_functs[] = {
     { 0, NULL }
 };
 
-/* index for storing external data in EC_KEY: set to >= 0 on first call */
+/* index for storing external data in EC_KEY: < 0 means uninitialized */
 static int ec_data_idx = -1;
 
 typedef struct _CAPI_DATA {
@@ -482,6 +482,7 @@ ecdsa_sign_sig(const unsigned char *dgst, int dgstlen,
         free(buf_hex);
         ecsig = ecdsa_bin2sig(buf, len);
     }
+    free(buf);
     return ecsig;
 }
 
@@ -500,6 +501,7 @@ ecdsa_sign(int type, const unsigned char *dgst, int dgstlen, unsigned char *sig,
     }
     *siglen = i2d_ECDSA_SIG((ECDSA_SIG *)s, &sig);
     ECDSA_SIG_free(s);
+
     char *buf_hex = format_hex(sig, *siglen, 0, NULL);
     msg(M_INFO, "EC sig from ncrypt converted to DER (len = %d): %s", *siglen, buf_hex);
     free(buf_hex);
