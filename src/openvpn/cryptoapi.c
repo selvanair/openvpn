@@ -103,6 +103,7 @@ static ERR_STRING_DATA CRYPTOAPI_str_functs[] = {
 
 /* index for storing external data in EC_KEY: < 0 means uninitialized */
 static int ec_data_idx = -1;
+static EC_KEY_METHOD *ec_method = NULL;
 
 typedef struct _CAPI_DATA {
     const CERT_CONTEXT *cert_context;
@@ -402,11 +403,11 @@ finish(RSA *rsa)
 static void
 ec_finish(EC_KEY *ec)
 {
-    const EC_KEY_METHOD *ec_meth = EC_KEY_get_method(ec);
-    CAPI_DATA *cd = (CAPI_DATA *) EC_KEY_get_ex_data(ec, ec_data_idx);
-
+    EC_KEY_METHOD_free(ec_method);
+    ec_method = NULL;
+    CAPI_DATA *cd = EC_KEY_get_ex_data(ec, ec_data_idx);
     CAPI_DATA_free(cd);
-    EC_KEY_METHOD_free((EC_KEY_METHOD*) ec_meth);
+    EC_KEY_set_ex_data(ec, ec_data_idx, NULL);
 }
 
 /* EC_KEY_METHOD callback sign_setup: we do nothing here */
@@ -657,8 +658,6 @@ ssl_ctx_set_eckey(SSL_CTX *ssl_ctx, CAPI_DATA *cd, EVP_PKEY *pkey)
 {
     EC_KEY *ec = NULL;
     EVP_PKEY *privkey = NULL;
-    EC_KEY_METHOD *ec_method = NULL;
-    bool ec_method_set = false;
 
     if (cd->key_spec != CERT_NCRYPT_KEY_SPEC)
     {
@@ -669,7 +668,7 @@ ssl_ctx_set_eckey(SSL_CTX *ssl_ctx, CAPI_DATA *cd, EVP_PKEY *pkey)
     ec_method = EC_KEY_METHOD_new(EC_KEY_OpenSSL());
     if (!ec_method)
     {
-        SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_FILE, ERR_R_MALLOC_FAILURE);
+        msg(M_NONFATAL, "ERROR: ssl_ctx_set_eckey: EC_KEY_METHOD_new failed");
         goto err;
     }
 
@@ -679,15 +678,14 @@ ssl_ctx_set_eckey(SSL_CTX *ssl_ctx, CAPI_DATA *cd, EVP_PKEY *pkey)
     ec = EC_KEY_dup(EVP_PKEY_get0_EC_KEY(pkey));
     if (!ec)
     {
-        SSLerr(SSL_F_SSL_CTX_USE_CERTIFICATE_FILE, ERR_R_MALLOC_FAILURE);
+        msg(M_NONFATAL, "ERROR: ssl_ctx_set_eckey: EC_KEY_dup failed");
         goto err;
     }
     if (!EC_KEY_set_method(ec, ec_method))
     {
-        msg(M_NONFATAL, "ERROR: EC_KEY_set_method failed");
+        msg(M_NONFATAL, "ERROR: ssl_ctx_set_eckey: EC_KEY_set_method failed");
         goto err;
     }
-    /* from here ec_method will get freed with ec when ecdsa_finish gets called */
 
     /* store cd as external data */
     if (ec_data_idx < 0)
@@ -695,14 +693,14 @@ ssl_ctx_set_eckey(SSL_CTX *ssl_ctx, CAPI_DATA *cd, EVP_PKEY *pkey)
         ec_data_idx = EC_KEY_get_ex_new_index(0, "cryptapicert ec key", NULL, NULL, NULL);
         if (ec_data_idx < 0)
         {
-            msg(M_NONFATAL, "ERROR: Failed to save application data in EC_KEY");
+            msg(M_NONFATAL, "ERROR: ssl_ctx_set_eckey: get_ex_new_index failed");
             goto err;
         }
     }
     EC_KEY_set_ex_data(ec, ec_data_idx, cd);
-    /* from here cd will get freed with ec when ecdsa_finish gets called */
 
-    cd->ref_count++; /* protect cd against double free on error below */
+    /* from here cd will get freed with ec when ecdsa_finish() gets called */
+    cd->ref_count++;
 
     privkey = EVP_PKEY_new();
     if (!EVP_PKEY_assign_EC_KEY(privkey, ec))
@@ -726,7 +724,7 @@ err:
     {
         EC_KEY_free(ec);
     }
-    if (ec_method && !ec_method_set)
+    if (ec_method)
     {
         EC_KEY_METHOD_free(ec_method);
     }
