@@ -627,8 +627,8 @@ ssl_ctx_set_rsakey(SSL_CTX *ssl_ctx, CAPI_DATA *cd, EVP_PKEY *pkey)
         msg(M_NONFATAL, "ERROR: ssl_ctx_set_rsa_key: RSA_set_method failed");
         goto err;
     }
-    rsa_method_set = true;
-    cd->ref_count++; /* so that cd gets down referenced, not freed on any error below */
+    rsa_method_set = true; /* method pointer will get freed with the key */
+    cd->ref_count++;
 
     if (!SSL_CTX_use_RSAPrivateKey(ssl_ctx, rsa))
     {
