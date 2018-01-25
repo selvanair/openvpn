@@ -1879,6 +1879,9 @@ add_route_ipv6(struct route_ipv6 *r6, const struct tuntap *tt, unsigned int flag
     network = print_in6_addr( r6->network, 0, &gc);
     gateway = print_in6_addr( r6->gateway, 0, &gc);
 
+    msg(M_INFO, "%s: r6 ptr = 0x%08x", __func__, r6);
+    msg(M_INFO, "%s: network = %s", __func__, network);
+
 #if defined(TARGET_DARWIN)    \
     || defined(TARGET_FREEBSD) || defined(TARGET_DRAGONFLY)    \
     || defined(TARGET_OPENBSD) || defined(TARGET_NETBSD)
@@ -2345,6 +2348,8 @@ delete_route_ipv6(const struct route_ipv6 *r6, const struct tuntap *tt, unsigned
 
     network = print_in6_addr( r6->network, 0, &gc);
     gateway = print_in6_addr( r6->gateway, 0, &gc);
+    msg(M_INFO, "%s: r6 ptr = 0x%08x", __func__, r6);
+    msg(M_INFO, "%s: network = %s", __func__, network);
 
 #if defined(TARGET_DARWIN)    \
     || defined(TARGET_FREEBSD) || defined(TARGET_DRAGONFLY)    \
