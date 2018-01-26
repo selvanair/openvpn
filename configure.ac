@@ -1292,13 +1292,14 @@ if test "${enable_pkcs11}" = "yes"; then
 	)
 fi
 
+CFLAGS="${CFLAGS} -Wall -Wno-unused-parameter -Wno-unused-function"
 if test "${enable_pedantic}" = "yes"; then
 	enable_strict="yes"
 	CFLAGS="${CFLAGS} -pedantic"
 	AC_DEFINE([PEDANTIC], [1], [Enable pedantic mode])
 fi
 if test "${enable_strict}" = "yes"; then
-	CFLAGS="${CFLAGS} -Wall -Wno-unused-parameter -Wno-unused-function"
+	CFLAGS="${CFLAGS} -Wsign-compare -Wuninitialized"
 fi
 if test "${enable_werror}" = "yes"; then
 	CFLAGS="${CFLAGS} -Werror"
