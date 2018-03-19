@@ -468,14 +468,6 @@ next_connection_entry(struct context *c)
                         c->c1.link_socket_addr.remote_list;
                 }
 
-                /*
-                 * Increase the number of connection attempts
-                 * If this is connect-retry-max * size(l)
-                 * OpenVPN will quit
-                 */
-
-                c->options.unsuccessful_attempts++;
-
                 if (++l->current >= l->len)
                 {
 
@@ -501,6 +493,9 @@ next_connection_entry(struct context *c)
         {
             /* allow management interface to override connection entry details */
             ce_defined = ce_management_query_remote(c);
+
+            /* ignore cycles when management-query-remote is in use */
+            n_cycles = 0;
             if (IS_SIG(c))
             {
                 break;
@@ -517,6 +512,7 @@ next_connection_entry(struct context *c)
 #endif
     } while (!ce_defined);
 
+    c->options.unsuccessful_attempts++;
     /* Check if this connection attempt would bring us over the limit */
     if (c->options.connect_retry_max > 0
         && c->options.unsuccessful_attempts > (l->len  * c->options.connect_retry_max))
