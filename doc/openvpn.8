@@ -3222,11 +3222,13 @@ allocation for dynamic IP (last choice).
 .br
 .\"*********************************************************
 .TP
-.B \-\-iroute network [netmask]
+.B \-\-iroute network[/bits] [netmask]
 Generate an internal route to a specific
 client. The
 .B netmask
 parameter, if omitted, defaults to 255.255.255.255.
+If both /bits and netmask are specified, netmask is
+ignored.
 
 This directive can be used to route a fixed subnet from
 the server to a particular client, regardless

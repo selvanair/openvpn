@@ -228,6 +228,19 @@ get_ipv6_addr(const char *hostname, struct in6_addr *network,
     return true;                /* parsing OK, values set */
 }
 
+bool
+get_ipv4_addr(unsigned int flags, const char *prefix_str, in_addr_t *network,
+              unsigned int *netbits, int msglevel)
+{
+    if (get_addr_generic(AF_INET, flags, prefix_str, network, netbits,
+                         0, NULL, msglevel) < 0)
+    {
+        return false;
+    }
+
+    return true;
+}
+
 static inline bool
 streqnull(const char *a, const char *b)
 {

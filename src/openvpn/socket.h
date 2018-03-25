@@ -550,6 +550,13 @@ in_addr_t getaddr(unsigned int flags,
 bool get_ipv6_addr(const char *hostname, struct in6_addr *network,
                    unsigned int *netbits, int msglevel);
 
+/**
+ * Translate an IPv4 address/bits or hostname/bits from string to in_addr_t
+ * and netbits
+ */
+bool get_ipv4_addr(unsigned int flags, const char *hostname, in_addr_t *network,
+                   unsigned int *netbits, int msglevel);
+
 int openvpn_getaddrinfo(unsigned int flags,
                         const char *hostname,
                         const char *servname,

@@ -425,7 +425,7 @@ static const char usage_message[] =
     "--ifconfig-ipv6-push local/bits remote : Push an ifconfig-ipv6 option to\n"
     "                  remote, overrides --ifconfig-ipv6-pool allocation.\n"
     "                  Only valid in a client-specific config file.\n"
-    "--iroute network [netmask] : Route subnet to client.\n"
+    "--iroute network[/bits] [netmask] : Route subnet to client.\n"
     "--iroute-ipv6 network/bits : Route IPv6 subnet to client.\n"
     "                  Sets up internal routes only.\n"
     "                  Only valid in a client-specific config file.\n"
@@ -1289,19 +1289,32 @@ show_p2mp_parms(const struct options *o)
 
 #if P2MP_SERVER
 
-static void
+bool
 option_iroute(struct options *o,
               const char *network_str,
               const char *netmask_str,
               int msglevel)
 {
     struct iroute *ir;
+    unsigned int bits = 0;
 
     ALLOC_OBJ_GC(ir, struct iroute, &o->gc);
-    ir->network = getaddr(GETADDR_HOST_ORDER, network_str, 0, NULL, NULL);
-    ir->netbits = -1;
 
-    if (netmask_str)
+    if (!get_ipv4_addr(GETADDR_HOST_ORDER, network_str, &ir->network,
+                       &bits, msglevel))
+    {
+        msg(msglevel, "in --iroute %s: Bad IPv4 network specification",
+            network_str);
+        return false;
+    }
+    ir->netbits = bits ? bits : -1;
+
+    if (strchr(network_str, '/') && netmask_str)
+    {
+        msg(msglevel, "in --iroute %s %s: Both netbits and netmask specified. "
+                      "Ignoring the netmask", network_str, netmask_str);
+    }
+    else if (netmask_str)
     {
         const in_addr_t netmask = getaddr(GETADDR_HOST_ORDER, netmask_str, 0, NULL, NULL);
         if (!netmask_to_netbits(ir->network, netmask, &ir->netbits))
@@ -1309,15 +1322,16 @@ option_iroute(struct options *o,
             msg(msglevel, "in --iroute %s %s : Bad network/subnet specification",
                 network_str,
                 netmask_str);
-            return;
+            return false;
         }
     }
 
     ir->next = o->iroutes;
     o->iroutes = ir;
+    return true;
 }
 
-static void
+bool
 option_iroute_ipv6(struct options *o,
                    const char *prefix_str,
                    int msglevel)
@@ -1330,11 +1344,12 @@ option_iroute_ipv6(struct options *o,
     {
         msg(msglevel, "in --iroute-ipv6 %s: Bad IPv6 prefix specification",
             prefix_str);
-        return;
+        return false;
     }
 
     ir->next = o->iroutes_ipv6;
     o->iroutes_ipv6 = ir;
+    return true;
 }
 #endif /* P2MP_SERVER */
 #endif /* P2MP */

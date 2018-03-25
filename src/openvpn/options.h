@@ -808,4 +808,9 @@ void options_string_import(struct options *options,
                            unsigned int *option_types_found,
                            struct env_set *es);
 
+bool option_iroute(struct options *o, const char *network,
+                   const char *netmask, int msglevel);
+bool option_iroute_ipv6(struct options *o, const char *prefix_str,
+		        int msglevel);
+
 #endif /* ifndef OPTIONS_H */
