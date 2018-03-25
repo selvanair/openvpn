@@ -165,6 +165,7 @@ struct management_callback
     void (*delete_event) (void *arg, event_t event);
     int (*n_clients) (void *arg);
 #ifdef MANAGEMENT_DEF_AUTH
+    bool (*add_iroute) (void *arg, const char *network, const char *dest);
     bool (*kill_by_cid)(void *arg, const unsigned long cid, const char *kill_msg);
     bool (*client_auth) (void *arg,
                          const unsigned long cid,

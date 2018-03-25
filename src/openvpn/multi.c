@@ -49,6 +49,7 @@
 
 #include "forward-inline.h"
 #include "pf-inline.h"
+#include "options.h"
 
 #include "crypto_backend.h"
 
@@ -3223,6 +3224,158 @@ management_delete_event(void *arg, event_t event)
     }
 }
 
+static struct multi_instance*
+lookup_by_ifconfig_v4(const struct multi_context *m, const in_addr_t *addr)
+{
+    struct multi_instance *mi;
+    struct hash_iterator hi;
+    struct hash_element *he;
+    bool found = false;
+
+    if (!addr)
+    {
+        return NULL;
+    }
+    hash_iterator_init(m->iter, &hi);
+    while (!found && (he = hash_iterator_next(&hi)))
+    {
+        mi = (struct multi_instance *) he->value;
+        found = (mi->context.c2.push_ifconfig_local == *addr);
+    }
+    hash_iterator_free(&hi);
+    return found ? mi : NULL;
+}
+
+static struct multi_instance*
+lookup_by_ifconfig_v6(const struct multi_context *m, const struct in6_addr *addr)
+{
+    struct multi_instance *mi;
+    struct hash_iterator hi;
+    struct hash_element *he;
+    bool found = false;
+
+    if (!addr)
+    {
+        return NULL;
+    }
+    hash_iterator_init(m->iter, &hi);
+    while (!found && (he = hash_iterator_next(&hi)))
+    {
+        mi = (struct multi_instance *) he->value;
+        found = !memcmp(&mi->context.c2.push_ifconfig_ipv6_local, addr, sizeof(*addr));
+    }
+    hash_iterator_free(&hi);
+    return found ? mi : NULL;
+}
+
+static struct multi_instance*
+lookup_by_cn(const struct multi_context *m, const char *cn)
+{
+    struct multi_instance *mi;
+    struct hash_iterator hi;
+    struct hash_element *he;
+    bool found = false;
+
+    if (!cn)
+    {
+        return NULL;
+    }
+    hash_iterator_init(m->iter, &hi);
+    while (!found && (he = hash_iterator_next(&hi)))
+    {
+        mi = (struct multi_instance *) he->value;
+        const char *try = tls_common_name(mi->context.c2.tls_multi, false);
+        found = (try && !strcmp(try, cn));
+    }
+    hash_iterator_free(&hi);
+    return found ? mi : NULL;
+}
+
+/* Lookup client specified by "CN:common-name", client-id or
+ * ifconfig_local address (IPv4 or IPv6)
+ */
+static struct multi_instance*
+lookup_client_generic(const struct multi_context *m, const char *client_spec)
+{
+    struct multi_instance *mi = NULL;
+    unsigned long cid;
+
+    if (strncmp(client_spec, "CN:", 3) == 0) /* parse as common name */
+    {
+        mi = lookup_by_cn(m, client_spec + 3);
+    }
+    else if (strchr(client_spec, '.'))     /* parse as ipv4 */
+    {
+        in_addr_t addr;
+        if (get_ipv4_addr(GETADDR_HOST_ORDER|GETADDR_MSG_VIRT_OUT, client_spec,
+                          &addr, NULL, M_WARN))
+        {
+            mi = lookup_by_ifconfig_v4(m, &addr);
+        }
+    }
+    else if (strchr(client_spec, ':')) /* parse as ipv6 */
+    {
+        struct in6_addr addr;
+        if (get_ipv6_addr(client_spec, &addr, NULL, M_WARN))
+        {
+            mi = lookup_by_ifconfig_v6(m, &addr);
+        }
+    }
+#ifdef MANAGEMENT_DEF_AUTH
+    else if (string_class(client_spec, CC_DIGIT, 0)
+             && sscanf(client_spec, "%lu", &cid) == 1)
+    {
+        mi = (struct multi_instance *) hash_lookup(m->cid_hash, &cid);
+    }
+#endif
+    else
+    {
+        msg(M_WARN, "WARNING: lookup_client: invalid destination '<%s>'", client_spec);
+    }
+    return mi;
+}
+
+static bool
+management_callback_add_iroute(void *arg, const char *network, const char *dest)
+{
+    bool ret = false;
+    struct multi_context *m = (struct multi_context *) arg;
+    struct multi_instance *mi = lookup_client_generic(m, dest);
+
+    if (!mi || !mi->did_iroutes)
+    {
+        msg(M_WARN, "WARNING: add_iroute: No matching client found or "
+                    "client state not yet ready for adding routes");
+        return ret;
+    }
+    if (TUNNEL_TYPE(mi->context.c1.tuntap) != DEV_TYPE_TUN)
+    {
+        msg(M_WARN, "WARNING: add_iroute: iroute requires TUN network");
+        return ret;
+    }
+    if (strstr(network, ":")) /* ipv6 */
+    {
+        /* this adds the entry to head of the options list */
+        ret = option_iroute_ipv6(&mi->context.options, network, D_IMPORT_ERRORS|M_OPTERR);
+        if (ret)
+        {
+            /* set the iroute for the entry just added */
+            multi_add_iroute6_entry(m, mi, mi->context.options.iroutes_ipv6);
+        }
+    }
+    else /* ipv4 */
+    {
+        /* this adds the entry to head of the options list */
+        ret = option_iroute(&mi->context.options, network, NULL, D_IMPORT_ERRORS|M_OPTERR);
+        if (ret)
+        {
+            /* set the iroute for the entry just added */
+            multi_add_iroute_entry(m, mi, mi->context.options.iroutes);
+        }
+    }
+    return ret;
+}
+
 #endif /* ifdef ENABLE_MANAGEMENT */
 
 #ifdef MANAGEMENT_DEF_AUTH
@@ -3363,6 +3516,7 @@ init_management_callback_multi(struct multi_context *m)
         cb.delete_event = management_delete_event;
         cb.n_clients = management_callback_n_clients;
 #ifdef MANAGEMENT_DEF_AUTH
+        cb.add_iroute = management_callback_add_iroute;
         cb.kill_by_cid = management_kill_by_cid;
         cb.client_auth = management_client_auth;
         cb.get_peer_info = management_get_peer_info;

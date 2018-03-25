@@ -95,6 +95,10 @@ man_help(void)
     msg(M_CLIENT, "remote type [host port] : Override remote directive, type=ACCEPT|MOD|SKIP.");
     msg(M_CLIENT, "proxy type [host port flags] : Enter dynamic proxy server info.");
     msg(M_CLIENT, "pid                    : Show process ID of the current OpenVPN process.");
+    msg(M_CLIENT, "add-iroute net dest    : Add an internal route to 'net' = network/length via");
+    msg(M_CLIENT, "                       : 'dest' where dest may be client's tunnel ip (v4 or v6)");
+    msg(M_CLIENT, "                       : or CN:common-name, or client-id");
+    msg(M_CLIENT, "del-iroute net dest    : Delete an internal route: see add-iroute for syntax");
 #ifdef ENABLE_PKCS11
     msg(M_CLIENT, "pkcs11-id-count        : Get number of available PKCS#11 identities.");
     msg(M_CLIENT, "pkcs11-id-get index    : Get PKCS#11 identity at index.");
@@ -1064,6 +1068,27 @@ man_client_kill(struct management *man, const char *cid_str, const char *kill_ms
 }
 
 static void
+man_add_iroute(struct management *man, const char *network, const char *dest)
+{
+    if (man->persist.callback.add_iroute)
+    {
+        const bool status = (*man->persist.callback.add_iroute)(man->persist.callback.arg, network, dest);
+        if (status)
+        {
+            msg(M_CLIENT, "SUCCESS: add-iroute command succeeded");
+        }
+        else
+        {
+            msg(M_CLIENT, "ERROR: add-iroute command failed");
+        }
+    }
+    else
+    {
+        msg(M_CLIENT, "ERROR: The add-iroute command is not supported by the current daemon mode");
+    }
+}
+
+static void
 man_client_n_clients(struct management *man)
 {
     if (man->persist.callback.n_clients)
@@ -1485,6 +1510,14 @@ man_dispatch_command(struct management *man, struct status_output *so, const cha
         if (man_need(man, p, 1, 0))
         {
             man_bytecount(man, atoi(p[1]));
+        }
+    }
+    else if (streq(p[0], "add-iroute"))
+    {
+        /* expect add-iroute network/bits cliend_ip|cid */
+        if (man_need(man, p, 2, 0))
+        {
+            man_add_iroute(man, p[1], p[2]);
         }
     }
 #ifdef MANAGEMENT_DEF_AUTH
