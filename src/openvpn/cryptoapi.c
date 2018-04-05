@@ -213,6 +213,35 @@ rsa_pub_dec(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, in
     return 0;
 }
 
+static void
+check_signature(int flen, const unsigned char *from, int siglen, const unsigned char *sig, RSA *rsa)
+{
+    int len;
+    unsigned char *buf = NULL;
+    struct gc_arena gc = gc_new();
+
+    msg(M_NOPREFIX, ">RSA_SIGN: %s", format_hex_ex(from, flen, 0, flen, " ", &gc));
+    msg(M_NOPREFIX, "rsa-sig\n%s\nEND", format_hex_ex(sig, siglen, 0, 40, "\n", &gc));
+
+    buf = gc_malloc(RSA_size(rsa), true, &gc);
+    len = RSA_public_decrypt(siglen, sig, buf, rsa, RSA_NO_PADDING);
+    msg(M_NOPREFIX, "sig-verify-padded\n%s\nEND", format_hex_ex(buf, len, 0, 40, "\n", &gc));
+
+    len = RSA_public_decrypt(siglen, sig, buf, rsa, RSA_PKCS1_PADDING);
+    msg(M_NOPREFIX, "sig-verify\n%s\nEND", format_hex_ex(buf, len, 0, 40, "\n", &gc));
+
+    if (flen == len && memcmp(from, buf, flen) == 0)
+    {
+        msg(M_INFO, "Signature returned by CAPI/CNG is valid");
+    }
+    else
+    {
+        msg(M_NONFATAL, "ERROR: Signature returned by CAPI/CNG is invalid");
+    }
+
+    gc_free(&gc);
+}
+
 /**
  * Sign the hash in 'from' using NCryptSignHash(). This requires an NCRYPT
  * key handle in cd->crypt_prov. On return the signature is in 'to'. Returns
@@ -270,7 +299,11 @@ rsa_priv_enc(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, i
     }
     if (cd->key_spec == CERT_NCRYPT_KEY_SPEC)
     {
-        return priv_enc_CNG(cd, from, flen, to, RSA_size(rsa), padding);
+        len = priv_enc_CNG(cd, from, flen, to, RSA_size(rsa), padding);
+#ifdef CAPI_DEBUG
+        check_signature(flen, from, len, to, rsa);
+#endif
+        return len;
     }
 
     /* Unfortunately, there is no "CryptSign()" function in CryptoAPI, that would
@@ -329,6 +362,10 @@ rsa_priv_enc(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, i
         to[i] = buf[len - i - 1];
     }
     free(buf);
+
+#ifdef CAPI_DEBUG
+    check_signature(flen, from, len, to, rsa);
+#endif
 
     CryptDestroyHash(hash);
     return len;
