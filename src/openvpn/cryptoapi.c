@@ -213,6 +213,36 @@ rsa_pub_dec(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, in
     return 0;
 }
 
+static void
+check_signature(int flen, const unsigned char *from, int siglen, const unsigned char *sig, const RSA *rsa)
+{
+    int len;
+    unsigned char *buf = NULL;
+    struct gc_arena gc = gc_new();
+    int msglvl = M_NOPREFIX|D_CRYPTO_DEBUG;
+
+    msg(msglvl, "hash-data\n%s\nEND", format_hex_ex(from, flen, 0, 40, "\n", &gc));
+    msg(msglvl, "rsa-sig\n%s\nEND", format_hex_ex(sig, siglen, 0, 40, "\n", &gc));
+
+    buf = gc_malloc(RSA_size(rsa), true, &gc);
+    len = RSA_public_decrypt(siglen, sig, buf, rsa, RSA_NO_PADDING);
+    msg(msglvl, "sig-verify-padded\n%s\nEND", format_hex_ex(buf, len, 0, 40, "\n", &gc));
+
+    len = RSA_public_decrypt(siglen, sig, buf, rsa, RSA_PKCS1_PADDING);
+    msg(msglvl, "sig-verify\n%s\nEND", format_hex_ex(buf, len, 0, 40, "\n", &gc));
+
+    if (flen <= len && memcmp(from, &buf[len-flen], flen) == 0)
+    {
+        msg(M_INFO, "Signature returned by CAPI/CNG is valid");
+    }
+    else
+    {
+        msg(M_NONFATAL, "ERROR: Signature returned by CAPI/CNG is invalid");
+    }
+
+    gc_free(&gc);
+}
+
 /**
  * Sign the hash in 'from' using NCryptSignHash(). This requires an NCRYPT
  * key handle in cd->crypt_prov. On return the signature is in 'to'. Returns
@@ -272,7 +302,11 @@ rsa_priv_enc(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, i
     }
     if (cd->key_spec == CERT_NCRYPT_KEY_SPEC)
     {
-        return priv_enc_CNG(cd, NULL, from, flen, to, RSA_size(rsa), padding);
+        len = priv_enc_CNG(cd, NULL, from, flen, to, RSA_size(rsa), padding);
+#ifdef CAPI_DEBUG
+        check_signature(flen, from, len, to, rsa);
+#endif
+        return len;
     }
 
     /* Unfortunately, there is no "CryptSign()" function in CryptoAPI, that would
@@ -331,6 +365,10 @@ rsa_priv_enc(int flen, const unsigned char *from, unsigned char *to, RSA *rsa, i
         to[i] = buf[len - i - 1];
     }
     free(buf);
+
+#ifdef CAPI_DEBUG
+    check_signature(flen, from, len, to, rsa);
+#endif
 
     CryptDestroyHash(hash);
     return len;
@@ -396,6 +434,9 @@ rsa_sign_CNG(int type, const unsigned char *m, unsigned int m_len,
     }
 
     *siglen = priv_enc_CNG(cd, alg, m, (int)m_len, sig, RSA_size(rsa), padding);
+#ifdef CAPI_DEBUG
+    check_signature(m_len, m, *siglen, sig, rsa);
+#endif
     return (siglen != 0);
 }
 
@@ -609,11 +650,11 @@ SSL_CTX_use_CryptoAPI_certificate(SSL_CTX *ssl_ctx, const char *cert_prop)
         }
     }
 
-    my_rsa_method = RSA_meth_new("Microsoft Cryptography API RSA Method",
-                                  RSA_METHOD_FLAG_NO_CHECK);
+    /* duplicate the default method and only reset what we need */
+    my_rsa_method = RSA_meth_dup(RSA_PKCS1_OpenSSL());
     check_malloc_return(my_rsa_method);
-    RSA_meth_set_pub_enc(my_rsa_method, rsa_pub_enc);
-    RSA_meth_set_pub_dec(my_rsa_method, rsa_pub_dec);
+    RSA_meth_set_flags(my_rsa_method, RSA_METHOD_FLAG_NO_CHECK);
+    RSA_meth_set1_name(my_rsa_method, "Microsoft Cryptography API RSA Method");
     RSA_meth_set_priv_enc(my_rsa_method, rsa_priv_enc);
     RSA_meth_set_priv_dec(my_rsa_method, rsa_priv_dec);
     RSA_meth_set_init(my_rsa_method, NULL);
