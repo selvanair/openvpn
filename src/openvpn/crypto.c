@@ -1857,7 +1857,7 @@ void
 write_pem_key_file(const char *filename, const char *pem_name)
 {
     struct gc_arena gc = gc_new();
-    struct key server_key = { 0 };
+    struct key server_key = {{0}};
     struct buffer server_key_buf = clear_buf();
     struct buffer server_key_pem = clear_buf();
 
