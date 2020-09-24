@@ -159,7 +159,7 @@ do_dns_service(bool add, const short family, const struct tuntap *tt)
     int addr_len = add ? len : 0;
     const char *ip_proto_name = family == AF_INET6 ? "IPv6" : "IPv4";
 
-    if (addr_len == 0 && add) /* no addresses to add */
+    if (addr_len == 0 && !tt->options.domain && add) /* no addresses or domain to add */
     {
         return true;
     }
@@ -199,9 +199,21 @@ do_dns_service(bool add, const short family, const struct tuntap *tt)
             dns.addr[i].ipv4.s_addr = htonl(tt->options.dns[i]);
         }
     }
+    if (tt->options.domain)
+    {
+        strncpy(dns.domains, tt->options.domain, _countof(dns.domains));
+	/* truncation of domain name is not checked as it cant happen
+	 * with 512 bytes room in dns.domains.
+	 */
+        msg(D_LOW, "%s dns domain on '%s' (if_index = %d) using service",
+            (add ? "Setting" : "Deleting"), dns.iface.name, dns.iface.index);
+    }
 
-    msg(D_LOW, "%s %s dns servers on '%s' (if_index = %d) using service",
-        (add ? "Setting" : "Deleting"), ip_proto_name, dns.iface.name, dns.iface.index);
+    if (addr_len > 0 || !add)
+    {
+        msg(D_LOW, "%s %s dns servers on '%s' (if_index = %d) using service",
+            (add ? "Setting" : "Deleting"), ip_proto_name, dns.iface.name, dns.iface.index);
+    }
 
     if (!send_msg_iservice(pipe, &dns, sizeof(dns), &ack, "TUN"))
     {
@@ -216,7 +228,8 @@ do_dns_service(bool add, const short family, const struct tuntap *tt)
         goto out;
     }
 
-    msg(M_INFO, "%s dns servers %s using service", ip_proto_name, (add ? "set" : "deleted"));
+    msg(M_INFO, "%s dns servers %s%s using service", ip_proto_name,
+		    (tt->options.domain? "and domain " : ""), (add ? "set" : "deleted"));
     ret = true;
 
 out:
