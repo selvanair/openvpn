@@ -1212,6 +1212,13 @@ HandleDNSConfigMessage(const dns_cfg_message_t *msg, undo_lists_t *lists)
         return ERROR_MESSAGE_DATA;
     }
 
+    /* use a non-const reference with limited scope to enforce null-termination of strings from client */
+    {
+        dns_cfg_message_t *msgptr = (dns_cfg_message_t *) msg;
+        msgptr->iface.name[_countof(msg->iface.name)-1] = '\0';
+        msgptr->domains[_countof(msg->domains)-1] = '\0';
+    }
+
     wchar_t *wide_name = utf8to16(msg->iface.name); /* utf8 to wide-char */
     if (!wide_name)
     {
