@@ -116,6 +116,19 @@ certificates and keys: https://github.com/OpenVPN/easy-rsa
   authority functions, you must set up the files :code:`index.txt` (may be
   empty) and :code:`serial` (initialize to :code:`01`).
 
+--cert pkcs11-uri
+  The local peer's certificate in a PKCS#11 token specified as a RFC 7512
+  uri. Cannot be used with ``--key file``. ``--key`` must be left unspecified
+  or point to the same uri. All other requrements for the certificate
+  described under ``--cert file`` applies.
+
+  Requires OpenSSL with pkcs11 engine installed and configured. Also see
+  the option ``--pkcs11-engine``.
+
+  As the same uri is used for certificate and private key, do not include type
+  attribute (:code: `type=cert;` or :code: `type=private;` should not
+  be included)
+
 --crl-verify args
   Check peer certificate against a Certificate Revocation List.
 
@@ -208,10 +221,27 @@ certificates and keys: https://github.com/OpenVPN/easy-rsa
   generated when you built your peer's certificate (see ``--cert file``
   above).
 
+--key pkcs11-uri
+  See ``--cert pkcs11-uri`` above.
+
 --pkcs12 file
   Specify a PKCS #12 file containing local private key, local certificate,
   and root CA certificate. This option can be used instead of ``--ca``,
   ``--cert``, and ``--key``.  Not available with mbed TLS.
+
+--pkcs11-engine engine-name [module-path]
+  Specifiy the pkcs11-engine and the provider module to load when
+  certificate and private key are given as a pkcs11 URI.
+
+  If the option is unspecified, and a pkcs11 URI is used for cert/key,
+  :code:`pkcs11` engine is loaded, if it can be automatically found by
+  OpenSSL.
+
+  If specified, the cert/key must be given as a pkcs11 URI.
+
+  The engine name could be a valid engine-id or path to a shared object.
+  The module-path should be the path to a shared object. Objects in
+  non-standard locations would need to be specified as full paths.
 
 --remote-cert-eku oid
   Require that peer certificate was signed with an explicit *extended key

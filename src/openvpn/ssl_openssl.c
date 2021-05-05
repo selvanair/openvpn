@@ -2251,4 +2251,185 @@ get_ssl_library_version(void)
     return OpenSSL_version(OPENSSL_VERSION);
 }
 
-#endif /* defined(ENABLE_CRYPTO_OPENSSL) */
+#if HAVE_OPENSSL_ENGINE
+#include <openssl/ui.h>
+#include <openssl/engine.h>
+
+/* Call back method for user interface with pkcs11 engine
+ * used for PIN prompt and possibly token insertion request.
+ */
+static int
+ui_reader(UI *ui, UI_STRING *uis)
+{
+    struct user_pass token_pass;
+    int ret = 0;
+
+    const char *uri = UI_get0_user_data(ui);
+    const char *prompt = UI_get0_output_string(uis);
+
+    token_pass.defined = false;
+    token_pass.nocache = true;
+
+    switch(UI_get_string_type(uis))
+    {
+        case UIT_PROMPT:
+        case UIT_VERIFY:
+            if (get_user_pass(&token_pass, NULL, prompt,
+                GET_USER_PASS_MANAGEMENT|GET_USER_PASS_PASSWORD_ONLY
+                |GET_USER_PASS_NOFATAL))
+            {
+                ret = 1;
+                UI_set_result(ui, uis, token_pass.password);
+            }
+            break;
+       case UIT_BOOLEAN:
+            if (get_user_pass(&token_pass, NULL, UI_get0_output_string(uis),
+                GET_USER_PASS_MANAGEMENT|GET_USER_PASS_NEED_OK
+                |GET_USER_PASS_NOFATAL))
+            {
+                ret = (strcmp(token_pass.password, "ok") == 0);
+                UI_set_result(ui, uis, token_pass.password);
+            }
+       case UIT_INFO:
+            msg(M_INFO, "INFO prompt from token: <%s>", prompt);
+            break;
+       case UIT_ERROR:
+            msg(M_INFO, "ERROR prompt from token: <%s>", prompt);
+            break;
+       default:
+            break;
+    }
+
+    return ret;
+}
+
+static char *
+ui_prompt_constructor(UI *ui, const char *desc, const char *name)
+{
+    int len =  strlen(desc) + strlen(name) + 6;
+    char *s = malloc(len);
+    openvpn_snprintf(s, len, "%s for %s", desc, name);
+    return s;
+}
+
+static ENGINE *
+load_pkcs11_engine(const char *engine_id)
+{
+    ENGINE *e = ENGINE_by_id(engine_id);
+
+    if (e) {
+        return e;
+    }
+
+    /* try dynamic engine with engine-id as path to the engine shared object */
+    e = ENGINE_by_id("dynamic");
+    if (e)
+    {
+        if (!ENGINE_ctrl_cmd_string(e, "SO_PATH", engine_id, 0)
+            || !ENGINE_ctrl_cmd_string(e, "LOAD", NULL, 0))
+        {
+            ENGINE_free(e);
+            e = NULL;
+        }
+    }
+    if (!e)
+    {
+        msg(M_WARN, "PKCS11 engine <%s> not available", engine_id);
+    }
+    return e;
+}
+
+static ENGINE *
+setup_pkcs11_engine(const char *engine_id, const char *module_path, UI_METHOD *ui)
+{
+    if (!engine_id)
+    {
+        engine_id = "pkcs11";
+    }
+
+    msg(D_SHOW_PKCS11, "Loading pkcs11 engine <%s> with module <%s>",
+        engine_id, (module_path ? module_path : "unspecified"));
+
+    ENGINE *e = load_pkcs11_engine(engine_id);
+
+    if (e)
+    {
+	if (module_path)
+        {
+            ENGINE_ctrl_cmd_string(e, "MODULE_PATH", module_path, 0);
+        }
+        ENGINE_ctrl_cmd(e, "SET_USER_INTERFACE", 0, ui, NULL, 0);
+    }
+
+    return e;
+}
+
+/**
+ * Load certificate and key into TLS context using pkcs11 engine
+ * @param ctx       TLS context
+ * @param cert_id   ceritificate and proivate key spec as pkcs11 URI
+ * @param engine    id or path of OpenSSL pkcs11 engine object (default: pkcs11)
+ * @param module    path of optional provider module to load with the engine
+ */
+int
+tls_ctx_use_pkcs11_engine(struct tls_root_ctx *tls_ctx, const char *cert_id,
+                          const char *engine, const char *module)
+{
+    int ret = 0;
+    EVP_PKEY *pkey = NULL;
+
+    UI_METHOD *ui = UI_create_method("openvpn");
+    if (!ui)
+    {
+        msg(M_WARN, "Failed to setup UI callback for engine");
+        return ret;
+    }
+    UI_method_set_reader(ui, ui_reader);
+    UI_method_set_prompt_constructor(ui, ui_prompt_constructor);
+
+    struct
+    {
+        const char *cert_id;
+        X509* cert;
+    } params = {cert_id, NULL};
+
+    ENGINE *e = setup_pkcs11_engine(engine, module, ui);
+    if (!e || !ENGINE_init(e))
+    {
+        goto cleanup;
+    }
+    ENGINE_ctrl_cmd(e, "SET_CALLBACK_DATA", 0, (void *)cert_id, NULL, 0);
+
+    msg (D_SHOW_PKCS11, "Loading certificate <%s> using engine", params.cert_id);
+
+    if (!ENGINE_ctrl_cmd(e, "LOAD_CERT_CTRL", 0, &params, NULL, 0)
+        || !params.cert || !SSL_CTX_use_certificate(tls_ctx->ctx, params.cert))
+    {
+        msg (M_WARN, "Failed to load certificate <%s>", cert_id);
+        goto finish;
+    }
+
+    msg (D_SHOW_PKCS11, "Loading private key <%s> using engine", params.cert_id);
+
+    pkey = ENGINE_load_private_key(e, cert_id, ui, (void *)cert_id);
+    if (!pkey || !SSL_CTX_use_PrivateKey(tls_ctx->ctx, pkey))
+    {
+        msg (M_WARN, "Failed to set private key <%s> using engine", cert_id);
+        goto finish;
+    }
+    ret = 1;
+
+finish:
+    ENGINE_finish(e);
+
+cleanup:
+    ENGINE_free(e);
+    X509_free(params.cert);
+    UI_destroy_method(ui);
+
+    return ret;
+}
+
+#endif /* HAVE_OPENSSL_ENGINE */
+
+#endif /* ENABLE_CRYPTO_OPENSSL */

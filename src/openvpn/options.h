@@ -659,6 +659,13 @@ struct options
 
     /* data channel crypto flags set by push/pull. Reuses the CO_* crypto_flags */
     unsigned int data_channel_crypto_flags;
+
+#ifdef HAVE_OPENSSL_ENGINE
+    const char *pkcs11_engine;
+    const char *pkcs11_engine_module;
+    /* flag to indicate cert and key files are specified as pkcs11 uri */
+    bool cert_file_is_pkcs11_uri;
+#endif
 };
 
 #define streq(x, y) (!strcmp((x), (y)))

@@ -4,6 +4,12 @@ Overview of changes in 2.6
 
 New features
 ------------
+Specification of private key and certificates as PKCS#11 URI
+    ``--cert`` and ``--key`` options can take RFC7512 PKCS#11
+    URI's pointing to certificate and key in a token. Both cert
+    and key must use the same URI. Requires OpenSSL with engine
+    support and pkcs11 (or compatible) engine installed.
+
 Keying Material Exporters (RFC 5705) based key generation
     As part of the cipher negotiation OpenVPN will automatically prefer
     the RFC5705 based key material generation to the current custom

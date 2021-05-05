@@ -568,4 +568,14 @@ void get_highest_preference_tls_cipher(char *buf, int size);
  */
 const char *get_ssl_library_version(void);
 
+/**
+ * Load certificate and key into TLS context using pkcs11 engine
+ * @param ctx       TLS context
+ * @param cert_id   ceritificate and proivate key spec as pkcs11 URI
+ * @param engine    id or path of OpenSSL pkcs11 engine object (default: pkcs11)
+ * @param module    path of optional provider module to load with the engine
+ */
+int tls_ctx_use_pkcs11_engine(struct tls_root_ctx *tls_ctx, const char *cert_id,
+                          const char *engine, const char *module);
+
 #endif /* SSL_BACKEND_H_ */

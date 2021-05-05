@@ -641,6 +641,19 @@ init_ssl(const struct options *options, struct tls_root_ctx *new_ctx, bool in_ch
             goto err;
         }
     }
+#ifdef HAVE_OPENSSL_ENGINE
+    else if (options->cert_file_is_pkcs11_uri)
+    {
+        if (!tls_ctx_use_pkcs11_engine(new_ctx, options->cert_file,
+                                       options->pkcs11_engine,
+                                       options->pkcs11_engine_module))
+        {
+            msg(M_WARN, "Cannot load certificate \"%s\" using PKCS#11 engine",
+                options->cert_file);
+            goto err;
+        }
+    }
+#endif
 #ifdef ENABLE_PKCS11
     else if (options->pkcs11_providers[0])
     {
@@ -672,7 +685,7 @@ init_ssl(const struct options *options, struct tls_root_ctx *new_ctx, bool in_ch
         tls_ctx_load_cert_file(new_ctx, options->cert_file, options->cert_file_inline);
     }
 
-    if (options->priv_key_file)
+    if (options->priv_key_file && !options->cert_file_is_pkcs11_uri)
     {
         if (0 != tls_ctx_load_priv_file(new_ctx, options->priv_key_file,
                                         options->priv_key_file_inline))

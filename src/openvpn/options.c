@@ -532,6 +532,11 @@ static const char usage_message[] =
 #ifndef ENABLE_CRYPTO_MBEDTLS
     "--engine [name] : Enable OpenSSL hardware crypto engine functionality.\n"
 #endif
+#ifdef HAVE_OPENSSL_ENGINE
+    "--pkcs11-engine name [module-path] : PKCS11 engine and provider module to use\n"
+    "                                     for cert and key specified as a pkcs11 URI.\n"
+    "                                     name could be an engine-id or a path.\n"
+#endif
     "--no-replay     : (DEPRECATED) Disable replay protection.\n"
     "--mute-replay-warnings : Silence the output of replay warnings to log file.\n"
     "--replay-window n [t]  : Use a replay protection sliding window of size n\n"
@@ -914,6 +919,12 @@ struct pull_filter_list
     struct pull_filter *head;
     struct pull_filter *tail;
 };
+
+static bool
+is_pkcs11_uri(const char *uri)
+{
+    return (uri && !strncmp(uri, "pkcs11:", 7));
+}
 
 static const char *
 pull_filter_type_name(int type)
@@ -2587,6 +2598,17 @@ options_postprocess_verify_ce(const struct options *options,
 
     if (options->tls_server || options->tls_client)
     {
+#ifdef HAVE_OPENSSL_ENGINE
+        if (is_pkcs11_uri(options->cert_file) != is_pkcs11_uri(options->priv_key_file))
+        {
+            msg(M_USAGE, "Use of PKCS#11 uri for --cert or --key and file name for the other is not supported");
+        }
+        else
+        if (options->pkcs11_engine && !is_pkcs11_uri(options->cert_file))
+        {
+            msg(M_USAGE, "Use of --pkcs11-engine expects --cert to be specified as a pkcs11: URI");
+        }
+#endif
 #ifdef ENABLE_PKCS11
         if (options->pkcs11_providers[0])
         {
@@ -3455,8 +3477,11 @@ options_postprocess_filechecks(struct options *options)
     errs |= check_file_access_chroot(options->chroot_dir, CHKACC_FILE,
                                      options->ca_path, R_OK, "--capath");
 
-    errs |= check_file_access_inline(options->cert_file_inline, CHKACC_FILE,
+    if (!is_pkcs11_uri(options->cert_file))
+    {
+        errs |= check_file_access_inline(options->cert_file_inline, CHKACC_FILE,
                                      options->cert_file, R_OK, "--cert");
+    }
 
     errs |= check_file_access_inline(options->extra_certs_file, CHKACC_FILE,
                                      options->extra_certs_file, R_OK,
@@ -3466,9 +3491,12 @@ options_postprocess_filechecks(struct options *options)
     if (!(options->management_flags & MF_EXTERNAL_KEY))
 #endif
     {
-        errs |= check_file_access_inline(options->priv_key_file_inline,
+        if (!is_pkcs11_uri(options->priv_key_file))
+        {
+            errs |= check_file_access_inline(options->priv_key_file_inline,
                                          CHKACC_FILE|CHKACC_PRIVATE,
                                          options->priv_key_file, R_OK, "--key");
+        }
     }
 
     errs |= check_file_access_inline(options->pkcs12_file_inline,
@@ -8097,6 +8125,14 @@ add_option(struct options *options,
         }
     }
 #endif /* ENABLE_CRYPTO_MBEDTLS */
+#ifdef HAVE_OPENSSL_ENGINE
+    else if (streq(p[0], "pkcs11-engine") && p[1] && !p[3])
+    {
+        VERIFY_PERMISSION(OPT_P_GENERAL);
+        options->pkcs11_engine = p[1];
+        options->pkcs11_engine_module = p[2]; /* may be NULL */
+    }
+#endif /* HAVE_OPENSSL_ENGINE */
 #ifdef ENABLE_PREDICTION_RESISTANCE
     else if (streq(p[0], "use-prediction-resistance") && !p[1])
     {
@@ -8156,6 +8192,20 @@ add_option(struct options *options,
         VERIFY_PERMISSION(OPT_P_GENERAL|OPT_P_INLINE);
         options->cert_file = p[1];
         options->cert_file_inline = is_inline;
+        if (is_pkcs11_uri(p[1]))
+        {
+#ifndef HAVE_OPENSSL_ENGINE
+            msg(msglevel, "Use of PKCS11 uri as cert and key file names requires OpenSSL "
+                          "ENGINE support which is missing in this binary.")
+#else
+            options->priv_key_file = p[1];
+            options->cert_file_is_pkcs11_uri = true;
+        }
+        else
+        {
+            options->cert_file_is_pkcs11_uri = false;
+#endif /* HAVE_OPENSSL_ENGINE */
+        }
     }
     else if (streq(p[0], "extra-certs") && p[1] && !p[2])
     {
@@ -8238,6 +8288,20 @@ add_option(struct options *options,
         VERIFY_PERMISSION(OPT_P_GENERAL|OPT_P_INLINE);
         options->priv_key_file = p[1];
         options->priv_key_file_inline = is_inline;
+        if (is_pkcs11_uri(p[1]))
+        {
+#ifndef HAVE_OPENSSL_ENGINE
+            msg(msglevel, "Use of PKCS11 uri as cert and key file names requires OpenSSL "
+                          "ENGINE support which is missing in this binary.")
+#else
+            options->cert_file = p[1];
+            options->cert_file_is_pkcs11_uri = true;
+        }
+        else
+        {
+            options->cert_file_is_pkcs11_uri = false;
+#endif /* HAVE_OPENSSL_ENGINE */
+        }
     }
     else if (streq(p[0], "tls-version-min") && p[1] && !p[3])
     {
