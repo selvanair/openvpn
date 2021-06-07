@@ -168,15 +168,17 @@ struct remote_entry
 
 struct connection_list
 {
+    int capacity;
     int len;
     int current;
-    struct connection_entry *array[CONNECTION_LIST_SIZE];
+    struct connection_entry **array;
 };
 
 struct remote_list
 {
+    int capacity;
     int len;
-    struct remote_entry *array[CONNECTION_LIST_SIZE];
+    struct remote_entry **array;
 };
 
 enum vlan_acceptable_frames
