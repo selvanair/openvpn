@@ -255,6 +255,8 @@ struct options
     bool no_advance;
     /* Counts the number of unsuccessful connection attempts */
     unsigned int unsuccessful_attempts;
+    /* count of connection entries to advance by when no_advance is not set */
+    int ce_advance_count;
 
 #if ENABLE_MANAGEMENT
     struct http_proxy_options *http_proxy_override;
