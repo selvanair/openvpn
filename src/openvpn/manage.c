@@ -3680,14 +3680,14 @@ management_query_pk_sig(struct management *man, const char *b64_data,
     const char *desc = "pk-sign";
     struct buffer buf_data = alloc_buf(strlen(b64_data) + strlen(algorithm) + 20);
 
-    if (man->connection.client_version <= 1)
+    if (0) //man->connection.client_version <= 1)
     {
         prompt = "RSA_SIGN";
         desc = "rsa-sign";
     }
 
     buf_write(&buf_data, b64_data, (int) strlen(b64_data));
-    if (man->connection.client_version > 2)
+    if (1) //man->connection.client_version > 2)
     {
         buf_write(&buf_data, ",", (int) strlen(","));
         buf_write(&buf_data, algorithm, (int) strlen(algorithm));
