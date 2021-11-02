@@ -468,41 +468,24 @@ find_certificate_in_store(const char *cert_prop, HCERTSTORE cert_store)
 
         /* skip the tag */
         cert_prop += 6;
-        for (p = cert_prop, i = 0; *p && i < sizeof(hash); i++)
+        char tmp[3] = {0};
+        /* cert_prop is a sequence of double hex digits with optional space separator */
+        for (p = cert_prop, i = 0; *p && i < sizeof(hash); )
         {
-            if (*p >= '0' && *p <= '9')
+            while (*p == ' ') /* skip continuous spaces */
             {
-                x = (*p - '0') << 4;
+                p++;
             }
-            else if (*p >= 'A' && *p <= 'F')
+            if (isxdigit(*p) && isxdigit(*(p+1))) /* double hex digits */
             {
-                x = (*p - 'A' + 10) << 4;
+                memcpy(tmp, p, 2);
+                hash[i++] = (int)  strtol(tmp, NULL, 16);
+                p += 2;
             }
-            else if (*p >= 'a' && *p <= 'f')
-            {
-                x = (*p - 'a' + 10) << 4;
-            }
-            if (!*++p)  /* unexpected end of string */
+            else if (*p)
             {
                 msg(M_WARN|M_INFO, "WARNING: cryptoapicert: error parsing <THUMB:%s>.", cert_prop);
                 goto out;
-            }
-            if (*p >= '0' && *p <= '9')
-            {
-                x += *p - '0';
-            }
-            else if (*p >= 'A' && *p <= 'F')
-            {
-                x += *p - 'A' + 10;
-            }
-            else if (*p >= 'a' && *p <= 'f')
-            {
-                x += *p - 'a' + 10;
-            }
-            hash[i] = x;
-            /* skip any space(s) between hex numbers */
-            for (p++; *p && *p == ' '; p++)
-            {
             }
         }
         blob.cbData = i;
@@ -946,32 +929,30 @@ SSL_CTX_use_CryptoAPI_certificate(SSL_CTX *ssl_ctx, const char *cert_prop)
         msg(M_NONFATAL, "Error in cryptoapicert: out of memory");
         goto err;
     }
-    /* search CURRENT_USER first, then LOCAL_MACHINE */
-    cs = CertOpenStore((LPCSTR) CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER
+
+    /* search CURRENT_USER store first, then LOCAL_MACHINE */
+    DWORD store[2] = {CERT_SYSTEM_STORE_CURRENT_USER, CERT_SYSTEM_STORE_LOCAL_MACHINE};
+    const char *store_name[2] = {"user", "machine"};
+    for (int i = 0; i < 2; i++)
+    {
+        cs = CertOpenStore((LPCSTR) CERT_STORE_PROV_SYSTEM, 0, 0, store[i]
                        |CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_READONLY_FLAG, L"MY");
-    if (cs == NULL)
-    {
-        msg(M_NONFATAL|M_ERRNO, "Error in cryptoapicert: failed to open user certficate store");
-        goto err;
-    }
-    cd->cert_context = find_certificate_in_store(cert_prop, cs);
-    CertCloseStore(cs, 0);
-    if (!cd->cert_context)
-    {
-        cs = CertOpenStore((LPCSTR) CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_LOCAL_MACHINE
-                           |CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_READONLY_FLAG, L"MY");
         if (cs == NULL)
         {
-            msg(M_NONFATAL|M_ERRNO, "Error in cryptoapicert: failed to open machine certficate store");
+            msg(M_NONFATAL|M_ERRNO, "Error in cryptoapicert: failed to open %s certficate store", store_name[i]);
             goto err;
         }
         cd->cert_context = find_certificate_in_store(cert_prop, cs);
         CertCloseStore(cs, 0);
-        if (cd->cert_context == NULL)
+        if (cd->cert_context)
         {
-            msg(M_NONFATAL, "Error in cryptoapicert: certificate matching <%s> not found", cert_prop);
-            goto err;
+            break;
         }
+    }
+    if (cd->cert_context == NULL)
+    {
+        msg(M_NONFATAL, "Error in cryptoapicert: certificate matching <%s> not found", cert_prop);
+        goto err;
     }
 
     /* cert_context->pbCertEncoded is the cert X509 DER encoded. */
