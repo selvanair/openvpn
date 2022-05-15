@@ -787,7 +787,7 @@ cleanup:
 /** Sign hash in tbs using EC key in cd and NCryptSignHash */
 static int
 xkey_cng_ec_sign(CAPI_DATA *cd, unsigned char *sig, size_t *siglen, const unsigned char *tbs,
-                 size_t tbslen)
+                 size_t tbslen, const char *keytype)
 {
     BYTE buf[1024]; /* large enough for EC keys upto 1024 bits */
     DWORD len = _countof(buf);
@@ -801,6 +801,22 @@ xkey_cng_ec_sign(CAPI_DATA *cd, unsigned char *sig, size_t *siglen, const unsign
         SetLastError(status);
         msg(M_NONFATAL|M_ERRNO, "Error in cryptoapicert: ECDSA signature using CNG failed.");
         return 0;
+    }
+
+    /* NCryptSignHash returns r|s -- return as is if EdDSA */
+    if (!strcmp(keytype, "EC25519"))
+    {
+        if (*siglen <= len)
+        {
+            memcpy(sig, buf, len);
+            *siglen = len;
+        }
+        else
+        {
+            msg(M_NONFATAL, "CNG: signature too long (length = %ld)", len);
+            *siglen = 0;
+        }
+        return (*siglen > 0);
     }
 
     /* NCryptSignHash returns r|s -- convert to OpenSSL's ECDSA_SIG */
@@ -908,7 +924,7 @@ xkey_cng_sign(void *handle, unsigned char *sig, size_t *siglen, const unsigned c
     size_t buflen = _countof(mdbuf);
 
     /* compute digest if required */
-    if (!strcmp(sigalg.op, "DigestSign"))
+    if (!strcmp(sigalg.op, "DigestSign") && !strcmp(sigalg.mdname, "none"))
     {
         if (!xkey_digest(tbs, tbslen, mdbuf, &buflen, sigalg.mdname))
         {
@@ -918,9 +934,12 @@ xkey_cng_sign(void *handle, unsigned char *sig, size_t *siglen, const unsigned c
         tbslen = buflen;
     }
 
-    if (!strcmp(sigalg.keytype, "EC"))
+    /* ED25519 requires Windows 10 or later -- if unsupported, we will
+     * log an error in the signing function.
+     */
+    if (!strcmp(sigalg.keytype, "EC") || !strcmp(sigalg.keytype, "ED25519"))
     {
-        return xkey_cng_ec_sign(cd, sig, siglen, tbs, tbslen);
+        return xkey_cng_ec_sign(cd, sig, siglen, tbs, tbslen, sigalg.keytype);
     }
     else if (!strcmp(sigalg.keytype, "RSA"))
     {
@@ -928,6 +947,7 @@ xkey_cng_sign(void *handle, unsigned char *sig, size_t *siglen, const unsigned c
     }
     else
     {
+        msg(M_NONFATAL, "xkey_cng_sign: Unknown keytype (%s)", sigalg.keytype);
         return 0; /* Unknown keytype -- should not happen */
     }
 }
