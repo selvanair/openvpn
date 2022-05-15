@@ -115,8 +115,13 @@ get_keytype(const XKEY_KEYDATA *key)
         case EVP_PKEY_ED25519:
             return "ED25519";
 
-        default:
+        case EVP_PKEY_EC:
             return "EC";
+
+        default:
+            /* should not happen */
+            msg(M_WARN, "Error: unsupported keytype (%d) in xkey_provider", keytype);
+            return "UNSUPPORTED";
     }
 }
 

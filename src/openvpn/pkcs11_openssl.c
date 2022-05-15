@@ -231,7 +231,8 @@ xkey_pkcs11h_sign(void *handle, unsigned char *sig,
     }
     else
     {
-        ASSERT(0);  /* coding error -- we couldnt have created any such key */
+        msg(M_NONFATAL, "PKCS#11: keytype (%s) is not supported.", sigalg.keytype);
+        return 0;
     }
 
     return CKR_OK == pkcs11h_certificate_signAny_ex(cert, &mech,

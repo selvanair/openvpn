@@ -211,7 +211,12 @@ xkey_management_sign(void *unused, unsigned char *sig, size_t *siglen,
     {
         strncpynt(alg_str, alg.keytype, sizeof(alg_str));
     }
-    /* else assume RSA key */
+    else if (strcmp(alg.keytype, "RSA"))
+    {
+        msg(M_NONFATAL, "xkey_management_sign: Unsupported key type (%s)", alg.keytype);
+        return 0;
+    }
+    /* RSA key */
     else if (!strcmp(alg.padmode, "pkcs1") && (flags & MF_EXTERNAL_KEY_PKCS1PAD))
     {
         /* For Sign, management interface expects a pkcs1 encoded digest -- add it */
