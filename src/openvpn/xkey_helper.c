@@ -129,6 +129,8 @@ xkey_load_generic_key(OSSL_LIB_CTX *libctx, void *handle, EVP_PKEY *pubkey,
         {"free_op", OSSL_PARAM_OCTET_PTR, (void **) &free_op, sizeof(void *), 0},
         {NULL, 0, NULL, 0, 0}
     };
+    msg(M_INFO, "%s: handle = %p sign_op = %p free_op = %p ", __FUNCTION__,
+        handle, sign_op, free_op);
 
     /* Do not use EVP_PKEY_new_from_pkey as that will take keymgmt from pubkey */
     EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(libctx, EVP_PKEY_get0_type_name(pubkey), props);

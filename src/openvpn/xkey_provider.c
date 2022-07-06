@@ -520,6 +520,8 @@ keymgmt_import_helper(XKEY_KEYDATA *key, const OSSL_PARAM *params)
         key->free = *(void **)p->data;
     }
     xkey_dmsg(D_XKEY, "imported external %s key", EVP_PKEY_get0_type_name(key->pubkey));
+    msg(M_INFO, "%s: handle = %p sign_op = %p free_op = %p", __FUNCTION__,
+        key->handle, key->sign, key->free);
 
     return 1;
 }
@@ -926,6 +928,8 @@ xkey_sign_dispatch(XKEY_SIGNATURE_CTX *sctx, unsigned char *sig, size_t *siglen,
     }
     else if (sign)
     {
+        msg(M_INFO, "%s: handle = %p sign_op = %p free_op = %p", __FUNCTION__,
+            sctx->keydata->handle, sctx->keydata->sign, sctx->keydata->free);
         ret = sign(sctx->keydata->handle, sig, siglen, tbs, tbslen, sctx->sigalg);
         xkey_dmsg(D_XKEY, "xkey_provider: external sign op returned ret = %d siglen = %d", ret, (int) *siglen);
     }
