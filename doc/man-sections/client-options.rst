@@ -138,7 +138,7 @@ configuration.
   Set ``--verb 6`` for debugging info showing the transformation of
   src/dest addresses in packets.
 
---connect-retry n
+--connect-retry n [max]
   Wait ``n`` seconds between connection attempts (default :code:`5`).
   Repeated reconnection attempts are slowed down after 5 retries per
   remote by doubling the wait time after each unsuccessful attempt. An
