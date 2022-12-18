@@ -97,6 +97,11 @@ tunnel_point_to_point(struct context *c)
         perf_pop();
     }
 
+    /*
+     * DCO resets traffic stats on reconnect, but we want to keep
+     * it for the duration of the process. Save the current values
+     * before closing instance. This is a nop if DCO is not in use.
+     */
     persist_client_stats(c);
 
     uninit_management_callback();
