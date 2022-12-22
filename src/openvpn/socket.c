@@ -567,12 +567,11 @@ openvpn_getaddrinfo(unsigned int flags,
                 if (sig_info->signal_received) /* were we interrupted by a signal? */
                 {
                     /* why are we overwriting SIGUSR1 ? */
-                    if (sig_info->signal_received == SIGUSR1) /* ignore SIGUSR1 */
+                    if (signal_reset(sig_info, SIGUSR1) == SIGUSR1) /* ignore SIGUSR1 */
                     {
                         msg(level,
                             "RESOLVE: Ignored SIGUSR1 signal received during "
                             "DNS resolution attempt");
-                        signal_reset(sig_info);
                     }
                     else
                     {
@@ -1588,7 +1587,6 @@ socket_connect(socket_descriptor_t *sd,
         openvpn_close_socket(*sd);
         *sd = SOCKET_UNDEFINED;
         register_signal(sig_info, SIGUSR1, "connection-failed");
-        sig_info->source = SIG_SOURCE_CONNECTION_FAILED;
     }
     else
     {
@@ -1784,7 +1782,6 @@ resolve_remote(struct link_socket *sock,
             {
                 if (signal_received)
                 {
-                    /* potential overwrite of signal */
                     register_signal(sig_info, SIGUSR1, "socks-resolve-failure");
                 }
                 goto done;
@@ -2177,7 +2174,7 @@ link_socket_init_phase2(struct context *c)
     if (sig_info->signal_received)
     {
         sig_save = *sig_info;
-        signal_reset(sig_info);
+        sig_save.signal_received = signal_reset(sig_info, 0);
     }
 
     /* initialize buffers */
