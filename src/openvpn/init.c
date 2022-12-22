@@ -2934,13 +2934,13 @@ do_init_crypto_tls_c1(struct context *c)
                 /* Intentional [[fallthrough]]; */
 
                 case AR_NOINTERACT:
-                    c->sig->signal_received = SIGUSR1; /* SOFT-SIGUSR1 -- Password failure error */
+                    /* SOFT-SIGUSR1 -- Password failure error */
+                    register_signal(c->sig, SIGUSR1, "private-key-password-failure");
                     break;
 
                 default:
                     ASSERT(0);
             }
-            c->sig->signal_text = "private-key-password-failure";
             return;
         }
 
@@ -4229,9 +4229,7 @@ init_instance(struct context *c, const struct env_set *env, const unsigned int f
     }
 
     /* signals caught here will abort */
-    c->sig->signal_received = 0;
-    c->sig->signal_text = NULL;
-    c->sig->source = SIG_SOURCE_SOFT;
+    signal_reset(c->sig);
 
     if (c->mode == CM_P2P)
     {
@@ -4733,7 +4731,7 @@ close_context(struct context *c, int sig, unsigned int flags)
 
     if (sig >= 0)
     {
-        c->sig->signal_received = sig;
+        register_signal(c->sig, sig, "close_context");
     }
 
     if (c->sig->signal_received == SIGUSR1)
@@ -4741,8 +4739,7 @@ close_context(struct context *c, int sig, unsigned int flags)
         if ((flags & CC_USR1_TO_HUP)
             || (c->sig->source == SIG_SOURCE_HARD && (flags & CC_HARD_USR1_TO_HUP)))
         {
-            c->sig->signal_received = SIGHUP;
-            c->sig->signal_text = "close_context usr1 to hup";
+            register_signal(c->sig, SIGHUP, "close_context usr1 to hup");
         }
     }
 
