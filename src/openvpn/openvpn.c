@@ -194,6 +194,7 @@ openvpn_main(int argc, char *argv[])
             context_clear_all_except_first_time(&c);
 
             /* static signal info object */
+            CLEAR(siginfo_static);
             c.sig = &siginfo_static;
 
             /* initialize garbage collector scoped to context object */
@@ -332,14 +333,14 @@ openvpn_main(int argc, char *argv[])
                 /* pass restart status to management subsystem */
                 signal_restart_status(c.sig);
             }
-            while (signal_reset(c.sig, SIGUSR1) == SIGUSR1);
+            while (c.sig->signal_received == SIGUSR1);
 
             env_set_destroy(c.es);
             uninit_options(&c.options);
             gc_reset(&c.gc);
             uninit_early(&c);
         }
-        while (signal_reset(c.sig, SIGHUP) == SIGHUP);
+        while (c.sig->signal_received == SIGHUP);
     }
 
     context_gc_free(&c);
