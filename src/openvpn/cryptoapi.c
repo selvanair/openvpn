@@ -213,48 +213,28 @@ find_certificate_in_store(const char *cert_prop, HCERTSTORE cert_store)
     }
     else if (!strncmp(cert_prop, "THUMB:", 6))
     {
-        const char *p;
-        int i, x = 0;
         find_type = CERT_FIND_HASH;
         find_param = &blob;
 
-        /* skip the tag */
-        cert_prop += 6;
-        for (p = cert_prop, i = 0; *p && i < sizeof(hash); i++)
+        int i = 0;
+
+        for (const char *p = cert_prop + 6; *p && i < sizeof(hash); p += 2)
         {
-            if (*p >= '0' && *p <= '9')
+            /* skip spaces */
+            while (*p == ' ')
             {
-                x = (*p - '0') << 4;
+                p++;
             }
-            else if (*p >= 'A' && *p <= 'F')
+            if (!*p) /* ending with spaces is not an error */
             {
-                x = (*p - 'A' + 10) << 4;
+                break;
             }
-            else if (*p >= 'a' && *p <= 'f')
+
+            if (!isxdigit(p[0]) || !isxdigit(p[1])
+                || sscanf(p, "%2hhx", &hash[i++]) != 1)
             {
-                x = (*p - 'a' + 10) << 4;
-            }
-            if (!*++p)  /* unexpected end of string */
-            {
-                msg(M_WARN|M_INFO, "WARNING: cryptoapicert: error parsing <THUMB:%s>.", cert_prop);
+                msg(M_WARN|M_INFO, "WARNING: cryptoapicert: error parsing <%s>.", cert_prop);
                 goto out;
-            }
-            if (*p >= '0' && *p <= '9')
-            {
-                x += *p - '0';
-            }
-            else if (*p >= 'A' && *p <= 'F')
-            {
-                x += *p - 'A' + 10;
-            }
-            else if (*p >= 'a' && *p <= 'f')
-            {
-                x += *p - 'a' + 10;
-            }
-            hash[i] = x;
-            /* skip any space(s) between hex numbers */
-            for (p++; *p && *p == ' '; p++)
-            {
             }
         }
         blob.cbData = i;
