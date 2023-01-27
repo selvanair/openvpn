@@ -129,7 +129,6 @@ block_async_signals(void)
 #ifndef _WIN32
     sigset_t all;
     sigfillset(&all); /* all signals */
-
     sigprocmask(SIG_BLOCK, &all, NULL);
 #endif
 }
@@ -181,19 +180,19 @@ throw_signal(const int signum)
 {
     if (ignored_hard_signals_mask & (1LL << signum))
     {
-        dmsg(D_LOW, "Signal %s is currently ignored", signal_name(signum, true));
+        msg(D_SIGNAL_DEBUG, "Signal %s is currently ignored", signal_name(signum, true));
         return;
     }
     block_async_signals();
 
     if (!try_throw_signal(&siginfo_static, signum, SIG_SOURCE_HARD))
     {
-        dmsg(D_LOW, "Ignoring %s when %s has been received", signal_name(signum, true),
-             signal_name(siginfo_static.signal_received, true));
+        msg(D_SIGNAL_DEBUG, "Ignoring %s when %s has been received", signal_name(signum, true),
+            signal_name(siginfo_static.signal_received, true));
     }
     else
     {
-        dmsg(D_LOW, "Throw signal: %s ", signal_name(signum, true));
+        msg(D_SIGNAL_DEBUG, "Throw signal (hard): %s ", signal_name(signum, true));
     }
 
     unblock_async_signals();
@@ -213,11 +212,13 @@ throw_signal_soft(const int signum, const char *signal_text)
     if (try_throw_signal(&siginfo_static, signum, SIG_SOURCE_SOFT))
     {
         siginfo_static.signal_text = signal_text;
+        msg(D_SIGNAL_DEBUG, "Throw signal (soft): %s (%s)", signal_name(signum, true),
+            signal_text);
     }
     else
     {
-        dmsg(D_LOW, "Ignoring %s when %s has been received", signal_name(signum, true),
-             signal_name(siginfo_static.signal_received, true));
+        msg(D_SIGNAL_DEBUG, "Ignoring %s when %s has been received", signal_name(signum, true),
+            signal_name(siginfo_static.signal_received, true));
     }
 
     unblock_async_signals();
@@ -243,11 +244,13 @@ register_signal(struct signal_info *si, int signum, const char *signal_text)
         {
             si->source = SIG_SOURCE_CONNECTION_FAILED;
         }
+        msg(D_SIGNAL_DEBUG, "register signal: %s (%s)", signal_name(signum, true),
+            signal_text);
     }
     else
     {
-        dmsg(D_LOW, "Ignoring %s when %s has been received", signal_name(signum, true),
-             signal_name(si->signal_received, true));
+        msg(D_SIGNAL_DEBUG, "Ignoring %s when %s has been received", signal_name(signum, true),
+            signal_name(si->signal_received, true));
     }
 
     if (si == &siginfo_static)
