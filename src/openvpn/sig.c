@@ -281,6 +281,7 @@ signal_reset(struct signal_info *si, int signum)
             si->signal_received = 0;
             si->signal_text = NULL;
             si->source = SIG_SOURCE_SOFT;
+            msg(D_SIGNAL_DEBUG, "signal_reset: signal %s is cleared", signal_name(signum, true));
         }
 
         if (si == &siginfo_static)
