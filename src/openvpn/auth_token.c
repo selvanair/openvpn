@@ -304,6 +304,7 @@ verify_auth_token(struct user_pass *up, struct tls_multi *multi,
     uint8_t b64decoded[USER_PASS_LEN];
     int decoded_len = openvpn_base64_decode(up->password + strlen(SESSION_ID_PREFIX),
                                             b64decoded, USER_PASS_LEN);
+    ASSERT(up && !up->protected);
 
     /*
      * Ensure that the decoded data is the size of the
