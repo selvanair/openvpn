@@ -71,7 +71,6 @@ struct user_pass
     /* Note that username and password are expected to be null-terminated */
     char username[USER_PASS_LEN];
     char password[USER_PASS_LEN];
-    char pad; /* used by protect_user_pass() to determine boundary */
 };
 
 #ifdef ENABLE_MANAGEMENT
