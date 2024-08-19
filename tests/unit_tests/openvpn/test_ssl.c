@@ -253,11 +253,23 @@ test_load_certificate_and_key_uri(void **state)
     const char *keyfile = global_state.keyfile;
     struct gc_arena *gc = &global_state.gc;
 
-    struct buffer certuri = alloc_buf_gc(5 + strlen(certfile) + 1, gc); /* 5 bytes for "file:" */
-    struct buffer keyuri = alloc_buf_gc(5 + strlen(keyfile) + 1, gc); /* 5 bytes for "file:" */
-    assert_true(buf_printf(&certuri, "file:%s", certfile));
-    assert_true(buf_printf(&keyuri, "file:%s", keyfile));
+    struct buffer certuri = alloc_buf_gc(6 + strlen(certfile) + 1, gc); /* 5 bytes for "file:/" */
+    struct buffer keyuri = alloc_buf_gc(6 + strlen(keyfile) + 1, gc); /* 5 bytes for "file:/" */
 
+    const char *lead = "";
+    /* Windows temp file path starts with drive letter -- add a leading slash for URI */
+#ifdef _WIN32
+    lead = "/";
+#endif /* _WIN32 */
+    assert_true(buf_printf(&certuri, "file:%s%s", lead, certfile));
+    assert_true(buf_printf(&keyuri, "file:%s%s", lead, keyfile));
+
+    /* On Windows replace '\' by '/' */
+#ifdef _WIN32
+    string_mod(BSTR(&certuri), CC_ANY, CC_BACKSLASH, '/');
+    string_mod(BSTR(&keyuri), CC_ANY, CC_BACKSLASH, '/');
+#endif /* _WIN32 */
+    print_message("certuri = %s\n", BSTR(&certuri));
     tls_ctx_client_new(&ctx);
     tls_ctx_load_cert_file(&ctx, BSTR(&certuri), false);
     assert_int_equal(tls_ctx_load_priv_file(&ctx, BSTR(&keyuri), false), 0);
