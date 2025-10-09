@@ -38,8 +38,8 @@
 #include "error.h"
 #include "mock_msg.h"
 
-unsigned int x_debug_level = 0; /* Default to (almost) no debugging output */
-unsigned int print_x_debug_level = 0;
+unsigned int x_debug_level = 9; /* Default to (almost) no debugging output */
+unsigned int print_x_debug_level = 9;
 
 bool fatal_error_triggered = false;
 
